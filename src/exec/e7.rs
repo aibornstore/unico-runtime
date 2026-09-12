@@ -48,6 +48,14 @@ pub enum Instruction {
     MulMod { dst: u8, a: u8, b: u8, m: u8 },
     AddMod { dst: u8, a: u8, b: u8, m: u8 },
     ModExp { dst: u8, base: u8, exp: u8, m: u8 },
+    /// Store AES-128 key (16 bytes) from vreg into slot, auto-expanded to 11 round keys
+    StoreAes128Key { slot: u8, src: u8 },
+    /// Store AES-256 key (32 bytes) from vreg into slot, auto-expanded to 15 round keys
+    StoreAes256Key { slot: u8, src: u8 },
+    /// Store ChaCha20 key (32 bytes) from vreg into slot
+    StoreChaCha20Key { slot: u8, src: u8 },
+    /// Store Poly1305 key (32 bytes) from vreg into slot
+    StorePoly1305Key { slot: u8, src: u8 },
     Ret,
     Call { fn_idx: u32 },
     Trap,
@@ -69,9 +77,30 @@ impl E7Module {
     pub fn new(functions: Vec<E7FunctionDef>) -> Self { E7Module { functions } }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct CryptoSlot {
-    pub aes_round_keys: Vec<[u8; 16]>,
+/// Crypto slot contract for E7 hardware crypto operations.
+/// Each slot can hold pre-expanded keys for different algorithms.
+#[derive(Debug, Clone)]
+pub enum CryptoSlot {
+    /// Empty slot - no key material loaded
+    Empty,
+    /// AES-128: 11 round keys (16 bytes each = 176 bytes)
+    Aes128 { round_keys: [u8; 176] },
+    /// AES-256: 15 round keys (16 bytes each = 240 bytes)
+    Aes256 { round_keys: [u8; 240] },
+    /// ChaCha20: 32-byte key (nonce comes from message register at execution time)
+    ChaCha20 { key: [u8; 32] },
+    /// Poly1305: 32-byte key (r[16] || s[16])
+    Poly1305 { key: [u8; 32] },
+}
+
+impl Default for CryptoSlot {
+    fn default() -> Self { CryptoSlot::Empty }
+}
+
+impl CryptoSlot {
+    pub fn is_empty(&self) -> bool {
+        matches!(self, CryptoSlot::Empty)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -896,14 +925,14 @@ fn aes_shift_rows(state: &mut [u8; 16]) {
     let t = state[1]; state[1] = state[5]; state[5] = state[9]; state[9] = state[13]; state[13] = t;
     let t = state[2]; state[2] = state[10]; state[10] = t;
     let t = state[6]; state[6] = state[14]; state[14] = t;
-    let t = state[3]; state[3] = state[7]; state[7] = state[11]; state[11] = t;
+    let t = state[15]; state[15] = state[11]; state[11] = state[7]; state[7] = state[3]; state[3] = t;
 }
 
 fn aes_inv_shift_rows(state: &mut [u8; 16]) {
     let t = state[1]; state[1] = state[13]; state[13] = state[9]; state[9] = state[5]; state[5] = t;
     let t = state[2]; state[2] = state[10]; state[10] = t;
     let t = state[6]; state[6] = state[14]; state[14] = t;
-    let t = state[3]; state[3] = state[7]; state[7] = state[11]; state[11] = t;
+    let t = state[3]; state[3] = state[7]; state[7] = state[11]; state[11] = state[15]; state[15] = t;
 }
 
 fn aes_mix_columns(state: &mut [u8; 16]) {
@@ -930,8 +959,8 @@ fn aes_inv_mix_columns(state: &mut [u8; 16]) {
 
 fn aes_add_round_key(state: &mut [u8; 16], key: &[u8; 16]) { for i in 0..16 { state[i] ^= key[i]; } }
 
-fn aes128_key_expand(key: &[u8; 16]) -> Vec<[u8; 16]> {
-    let mut round_keys = Vec::with_capacity(11);
+fn aes128_key_expand(key: &[u8; 16]) -> [[u8; 16]; 11] {
+    let mut round_keys = [[0u8; 16]; 11];
     let mut key_schedule: Vec<[u8; 4]> = Vec::with_capacity(44);
     for i in 0..4 { key_schedule.push([key[i*4], key[i*4+1], key[i*4+2], key[i*4+3]]); }
     let mut rcon = 1u8;
@@ -951,15 +980,13 @@ fn aes128_key_expand(key: &[u8; 16]) -> Vec<[u8; 16]> {
         ]);
     }
     for round in 0..11 {
-        let mut rk = [0u8; 16];
-        for i in 0..4 { rk[i*4..i*4+4].copy_from_slice(&key_schedule[round * 4 + i]); }
-        round_keys.push(rk);
+        for i in 0..4 { round_keys[round][i*4..i*4+4].copy_from_slice(&key_schedule[round * 4 + i]); }
     }
     round_keys
 }
 
-fn aes256_key_expand(key: &[u8; 32]) -> Vec<[u8; 16]> {
-    let mut round_keys = Vec::with_capacity(15);
+fn aes256_key_expand(key: &[u8; 32]) -> [[u8; 16]; 15] {
+    let mut round_keys = [[0u8; 16]; 15];
     let mut key_schedule: Vec<[u8; 4]> = Vec::with_capacity(60);
     for i in 0..8 { key_schedule.push([key[i*4], key[i*4+1], key[i*4+2], key[i*4+3]]); }
     let mut rcon = 1u8;
@@ -982,15 +1009,35 @@ fn aes256_key_expand(key: &[u8; 32]) -> Vec<[u8; 16]> {
         ]);
     }
     for round in 0..15 {
-        let mut rk = [0u8; 16];
-        for i in 0..4 { rk[i*4..i*4+4].copy_from_slice(&key_schedule[round * 4 + i]); }
-        round_keys.push(rk);
+        for i in 0..4 { round_keys[round][i*4..i*4+4].copy_from_slice(&key_schedule[round * 4 + i]); }
     }
     round_keys
 }
 
+fn aes128_key_expand_array(key: &[u8; 16]) -> [u8; 176] {
+    let round_keys = aes128_key_expand(key);
+    let mut out = [0u8; 176];
+    for (i, rk) in round_keys.iter().enumerate() {
+        out[i * 16..i * 16 + 16].copy_from_slice(rk);
+    }
+    out
+}
+
+fn aes256_key_expand_array(key: &[u8; 32]) -> [u8; 240] {
+    let round_keys = aes256_key_expand(key);
+    let mut out = [0u8; 240];
+    for (i, rk) in round_keys.iter().enumerate() {
+        out[i * 16..i * 16 + 16].copy_from_slice(rk);
+    }
+    out
+}
+
 pub fn aes128_encrypt(plaintext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
     let round_keys = aes128_key_expand(key);
+    aes128_encrypt_with_round_keys(plaintext, &round_keys)
+}
+
+pub fn aes128_encrypt_with_round_keys(plaintext: &[u8; 16], round_keys: &[[u8; 16]; 11]) -> [u8; 16] {
     let mut state = *plaintext;
     aes_add_round_key(&mut state, &round_keys[0]);
     for round in 1..10 {
@@ -1004,6 +1051,10 @@ pub fn aes128_encrypt(plaintext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
 
 pub fn aes128_decrypt(ciphertext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
     let round_keys = aes128_key_expand(key);
+    aes128_decrypt_with_round_keys(ciphertext, &round_keys)
+}
+
+pub fn aes128_decrypt_with_round_keys(ciphertext: &[u8; 16], round_keys: &[[u8; 16]; 11]) -> [u8; 16] {
     let mut state = *ciphertext;
     aes_add_round_key(&mut state, &round_keys[10]);
     for round in (1..10).rev() {
@@ -1018,6 +1069,10 @@ pub fn aes128_decrypt(ciphertext: &[u8; 16], key: &[u8; 16]) -> [u8; 16] {
 
 pub fn aes256_encrypt(plaintext: &[u8; 16], key: &[u8; 32]) -> [u8; 16] {
     let round_keys = aes256_key_expand(key);
+    aes256_encrypt_with_round_keys(plaintext, &round_keys)
+}
+
+pub fn aes256_encrypt_with_round_keys(plaintext: &[u8; 16], round_keys: &[[u8; 16]; 15]) -> [u8; 16] {
     let mut state = *plaintext;
     aes_add_round_key(&mut state, &round_keys[0]);
     for round in 1..14 {
@@ -1031,6 +1086,10 @@ pub fn aes256_encrypt(plaintext: &[u8; 16], key: &[u8; 32]) -> [u8; 16] {
 
 pub fn aes256_decrypt(ciphertext: &[u8; 16], key: &[u8; 32]) -> [u8; 16] {
     let round_keys = aes256_key_expand(key);
+    aes256_decrypt_with_round_keys(ciphertext, &round_keys)
+}
+
+pub fn aes256_decrypt_with_round_keys(ciphertext: &[u8; 16], round_keys: &[[u8; 16]; 15]) -> [u8; 16] {
     let mut state = *ciphertext;
     aes_add_round_key(&mut state, &round_keys[14]);
     for round in (1..14).rev() {
@@ -1082,108 +1141,138 @@ impl E7Executor {
             match instr {
                 Instruction::Aes128Enc { dst, src, key_slot } => {
                     let src_data = self.load_vreg(*src);
-                    let key = self.frames.last().unwrap().crypto_slots[*key_slot as usize]
-                        .aes_round_keys.first().ok_or_else(|| Error::Format("AES key slot empty".to_string()))?;
-                    let key_arr: [u8; 16] = key.clone().try_into().unwrap();
+                    if src_data.len() < 16 { 
+                        return Err(Error::Format("AES input too short".to_string())); 
+                    }
+                    let slot = &self.frames.last().unwrap().crypto_slots[*key_slot as usize];
+                    let round_keys = match slot {
+                        CryptoSlot::Aes128 { round_keys } => {
+                            // Convert flat [u8; 176] to [[u8; 16]; 11]
+                            let mut keys = [[0u8; 16]; 11];
+                            for i in 0..11 {
+                                let start = i * 16;
+                                keys[i].copy_from_slice(&round_keys[start..start + 16]);
+                            }
+                            keys
+                        }
+                        _ => return Err(Error::Format("AES128 key slot not initialized".to_string())),
+                    };
                     let pt: [u8; 16] = src_data[..16].try_into().map_err(|_| Error::Format("AES input too short".to_string()))?;
-                    let ct = aes128_encrypt(&pt, &key_arr);
+                    let ct = aes128_encrypt_with_round_keys(&pt, &round_keys);
                     self.store_vreg(*dst, &ct);
                 }
                 Instruction::Aes128Dec { dst, src, key_slot } => {
                     let src_data = self.load_vreg(*src);
-                    let key = self.frames.last().unwrap().crypto_slots[*key_slot as usize]
-                        .aes_round_keys.first().ok_or_else(|| Error::Format("AES key slot empty".to_string()))?;
-                    let key_arr: [u8; 16] = key.clone().try_into().unwrap();
+                    if src_data.len() < 16 { 
+                        return Err(Error::Format("AES input too short".to_string())); 
+                    }
+                    let slot = &self.frames.last().unwrap().crypto_slots[*key_slot as usize];
+                    let round_keys = match slot {
+                        CryptoSlot::Aes128 { round_keys } => {
+                            let mut keys = [[0u8; 16]; 11];
+                            for i in 0..11 {
+                                let start = i * 16;
+                                keys[i].copy_from_slice(&round_keys[start..start + 16]);
+                            }
+                            keys
+                        }
+                        _ => return Err(Error::Format("AES128 key slot not initialized".to_string())),
+                    };
                     let ct: [u8; 16] = src_data[..16].try_into().map_err(|_| Error::Format("AES input too short".to_string()))?;
-                    let pt = aes128_decrypt(&ct, &key_arr);
+                    let pt = aes128_decrypt_with_round_keys(&ct, &round_keys);
                     self.store_vreg(*dst, &pt);
                 }
                 Instruction::Aes256Enc { dst, src, key_slot } => {
                     let src_data = self.load_vreg(*src);
-                    let key_data = self.frames.last().unwrap().crypto_slots[*key_slot as usize]
-                        .aes_round_keys.first().ok_or_else(|| Error::Format("AES256 key slot empty".to_string()))?;
-                    if key_data.len() < 32 { return Err(Error::Format("AES256 key too short".to_string())); }
-                    let key_arr: [u8; 32] = key_data[..32].try_into().unwrap();
-                    let pt: [u8; 16] = src_data[..16].try_into().map_err(|_| Error::Format("AES256 input too short".to_string()))?;
-                    let ct = aes256_encrypt(&pt, &key_arr);
+                    if src_data.len() < 16 { 
+                        return Err(Error::Format("AES input too short".to_string())); 
+                    }
+                    let slot = &self.frames.last().unwrap().crypto_slots[*key_slot as usize];
+                    let round_keys = match slot {
+                        CryptoSlot::Aes256 { round_keys } => {
+                            let mut keys = [[0u8; 16]; 15];
+                            for i in 0..15 {
+                                let start = i * 16;
+                                keys[i].copy_from_slice(&round_keys[start..start + 16]);
+                            }
+                            keys
+                        }
+                        _ => return Err(Error::Format("AES256 key slot not initialized".to_string())),
+                    };
+                    let pt: [u8; 16] = src_data[..16].try_into().map_err(|_| Error::Format("AES input too short".to_string()))?;
+                    let ct = aes256_encrypt_with_round_keys(&pt, &round_keys);
                     self.store_vreg(*dst, &ct);
                 }
                 Instruction::Aes256Dec { dst, src, key_slot } => {
                     let src_data = self.load_vreg(*src);
-                    let key_data = self.frames.last().unwrap().crypto_slots[*key_slot as usize]
-                        .aes_round_keys.first().ok_or_else(|| Error::Format("AES256 key slot empty".to_string()))?;
-                    if key_data.len() < 32 { return Err(Error::Format("AES256 key too short".to_string())); }
-                    let key_arr: [u8; 32] = key_data[..32].try_into().unwrap();
-                    let ct: [u8; 16] = src_data[..16].try_into().map_err(|_| Error::Format("AES256 input too short".to_string()))?;
-                    let pt = aes256_decrypt(&ct, &key_arr);
+                    if src_data.len() < 16 { 
+                        return Err(Error::Format("AES input too short".to_string())); 
+                    }
+                    let slot = &self.frames.last().unwrap().crypto_slots[*key_slot as usize];
+                    let round_keys = match slot {
+                        CryptoSlot::Aes256 { round_keys } => {
+                            let mut keys = [[0u8; 16]; 15];
+                            for i in 0..15 {
+                                let start = i * 16;
+                                keys[i].copy_from_slice(&round_keys[start..start + 16]);
+                            }
+                            keys
+                        }
+                        _ => return Err(Error::Format("AES256 key slot not initialized".to_string())),
+                    };
+                    let ct: [u8; 16] = src_data[..16].try_into().map_err(|_| Error::Format("AES input too short".to_string()))?;
+                    let pt = aes256_decrypt_with_round_keys(&ct, &round_keys);
                     self.store_vreg(*dst, &pt);
-                }
-                Instruction::Sha256 { dst, src, count } => {
-                    let src_data = self.load_vreg(*src);
-                    let len = (*count as usize).min(src_data.len());
-                    let hash = sha256(&src_data[..len]);
-                    self.store_vreg(*dst, &hash);
-                }
-                Instruction::Blake2S { dst, src, count } => {
-                    let src_data = self.load_vreg(*src);
-                    let len = (*count as usize).min(src_data.len());
-                    let hash = blake2s_256(&src_data[..len], &[]);
-                    self.store_vreg(*dst, &hash);
-                }
-                Instruction::Hmac { dst, key, data, count } => {
-                    let key_data = self.load_vreg(*key);
-                    let data_data = self.load_vreg(*data);
-                    let len = (*count as usize).min(data_data.len().min(key_data.len()));
-                    let mac = hmac_sha256(&key_data[..len], &data_data[..len]);
-                    self.store_vreg(*dst, &mac);
-                }
-                Instruction::Hkdf { dk, ikm, salt, info, count } => {
-                    let ikm_data = self.load_vreg(*ikm);
-                    let salt_data = self.load_vreg(*salt);
-                    let info_data = self.load_vreg(*info);
-                    let okm = hkdf_sha256(&ikm_data, &salt_data, &info_data, *count as usize);
-                    self.store_vreg(*dk, &okm);
-                }
-                Instruction::Poly1305 { dst, msg, count } => {
-                    let msg_data = self.load_vreg(*msg);
-                    let len = (*count as usize).min(msg_data.len());
-                    let mut key = [0u8; 32];
-                    key.copy_from_slice(&msg_data[len..][..32.min(msg_data.len().saturating_sub(len))]);
-                    let tag = poly1305_mac(&msg_data[..len], &key);
-                    self.store_vreg(*dst, &tag);
                 }
                 Instruction::ChaCha20 { dst, msg, nonce, key_slot } => {
                     let msg_data = self.load_vreg(*msg);
-                    let key_data = self.frames.last().unwrap().crypto_slots[*key_slot as usize]
-                        .aes_round_keys.first().ok_or_else(|| Error::Format("ChaCha20 key slot empty".to_string()))?;
-                    if key_data.len() < 32 || msg_data.len() < 12 {
-                        return Err(Error::Format("ChaCha20: need 32-byte key and 12-byte nonce".to_string()));
+                    let slot = &self.frames.last().unwrap().crypto_slots[*key_slot as usize];
+                    let key_arr: [u8; 32] = match slot {
+                        CryptoSlot::ChaCha20 { key } => *key,
+                        _ => return Err(Error::Format("ChaCha20 key slot not initialized".to_string())),
+                    };
+                    if msg_data.len() < 12 {
+                        return Err(Error::Format("ChaCha20: need 12-byte nonce".to_string()));
                     }
-                    let key_arr: [u8; 32] = key_data[..32].try_into().unwrap();
                     let nonce_arr: [u8; 12] = msg_data[..12].try_into().map_err(|_| Error::Format("ChaCha20 nonce too short".to_string()))?;
                     let ct = chacha20_ctr(&key_arr, &nonce_arr, &msg_data[12..]);
                     self.store_vreg(*dst, &ct);
                 }
-                Instruction::Xor { dst, a, b, count } => {
-                    let a_data = self.load_vreg(*a);
-                    let b_data = self.load_vreg(*b);
-                    let len = (*count as usize).min(a_data.len().min(b_data.len()));
-                    let mut out = a_data[..len].to_vec();
-                    for i in 0..len { out[i] ^= b_data[i]; }
-                    self.store_vreg(*dst, &out);
-                }
-                Instruction::Rand { dst, count } => {
-                    let mut rng = (self.start.elapsed().as_nanos() ^ 0x5DEADu128) as u64;
-                    let mut data = vec![0u8; *count as usize];
-                    for byte in data.iter_mut() { rng = rng.wrapping_mul(1103515245).wrapping_add(12345); *byte = (rng >> 16) as u8; }
-                    self.store_vreg(*dst, &data);
-                }
-                Instruction::Cpy { dst, src, count } => {
+                Instruction::StoreAes128Key { slot, src } => {
                     let src_data = self.load_vreg(*src);
-                    let len = (*count as usize).min(src_data.len());
-                    self.store_vreg(*dst, &src_data[..len]);
+                    if src_data.len() < 16 {
+                        return Err(Error::Format("AES128 key too short (need 16 bytes)".to_string()));
+                    }
+                    let key: [u8; 16] = src_data[..16].try_into().map_err(|_| Error::Format("Invalid AES128 key".to_string()))?;
+                    let round_keys = aes128_key_expand_array(&key);
+                    self.frames.last_mut().unwrap().crypto_slots[*slot as usize] = CryptoSlot::Aes128 { round_keys };
                 }
-                Instruction::Load { dst, addr, count } => {
+                Instruction::StoreAes256Key { slot, src } => {
+                    let src_data = self.load_vreg(*src);
+                    if src_data.len() < 32 {
+                        return Err(Error::Format("AES256 key too short (need 32 bytes)".to_string()));
+                    }
+                    let key: [u8; 32] = src_data[..32].try_into().map_err(|_| Error::Format("Invalid AES256 key".to_string()))?;
+                    let round_keys = aes256_key_expand_array(&key);
+                    self.frames.last_mut().unwrap().crypto_slots[*slot as usize] = CryptoSlot::Aes256 { round_keys };
+                }
+                Instruction::StoreChaCha20Key { slot, src } => {
+                    let src_data = self.load_vreg(*src);
+                    if src_data.len() < 32 {
+                        return Err(Error::Format("ChaCha20 key too short (need 32 bytes)".to_string()));
+                    }
+                    let key: [u8; 32] = src_data[..32].try_into().map_err(|_| Error::Format("Invalid ChaCha20 key".to_string()))?;
+                    self.frames.last_mut().unwrap().crypto_slots[*slot as usize] = CryptoSlot::ChaCha20 { key };
+                }
+                Instruction::StorePoly1305Key { slot, src } => {
+                    let src_data = self.load_vreg(*src);
+                    if src_data.len() < 32 {
+                        return Err(Error::Format("Poly1305 key too short (need 32 bytes)".to_string()));
+                    }
+                    let key: [u8; 32] = src_data[..32].try_into().map_err(|_| Error::Format("Invalid Poly1305 key".to_string()))?;
+                    self.frames.last_mut().unwrap().crypto_slots[*slot as usize] = CryptoSlot::Poly1305 { key };
+                }
+                Instruction::Load { addr, dst, count } => {
                     self.check_memory(*addr, *count)?;
                     let data = self.memory[*addr as usize..(*addr as usize + *count as usize)].to_vec();
                     self.store_vreg(*dst, &data);
@@ -1275,6 +1364,30 @@ impl E7Executor {
                     });
                 }
                 Instruction::Trap => { return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit)); }
+                Instruction::Sha256 { dst, src, count } => {
+                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                }
+                Instruction::Blake2S { dst, src, count } => {
+                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                }
+                Instruction::Hmac { dst, key, data, count } => {
+                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                }
+                Instruction::Hkdf { dk, ikm, salt, info, count } => {
+                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                }
+                Instruction::Poly1305 { dst, msg, count } => {
+                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                }
+                Instruction::Xor { dst, a, b, count } => {
+                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                }
+                Instruction::Rand { dst, count } => {
+                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                }
+                Instruction::Cpy { dst, src, count } => {
+                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                }
             }
         }
     }
@@ -1314,6 +1427,10 @@ impl E7FunctionDef {
             Instruction::MulMod { dst, a, b, m } => { bytes.push(0x60); bytes.push(*dst); bytes.push(*a); bytes.push(*b); bytes.push(*m); }
             Instruction::AddMod { dst, a, b, m } => { bytes.push(0x61); bytes.push(*dst); bytes.push(*a); bytes.push(*b); bytes.push(*m); }
             Instruction::ModExp { dst, base, exp, m } => { bytes.push(0x62); bytes.push(*dst); bytes.push(*base); bytes.push(*exp); bytes.push(*m); }
+            Instruction::StoreAes128Key { slot, src } => { bytes.push(0x70); bytes.push(*slot); bytes.push(*src); }
+            Instruction::StoreAes256Key { slot, src } => { bytes.push(0x71); bytes.push(*slot); bytes.push(*src); }
+            Instruction::StoreChaCha20Key { slot, src } => { bytes.push(0x72); bytes.push(*slot); bytes.push(*src); }
+            Instruction::StorePoly1305Key { slot, src } => { bytes.push(0x73); bytes.push(*slot); bytes.push(*src); }
             Instruction::Ret => { bytes.push(0xFF); }
             Instruction::Call { fn_idx } => { bytes.push(0xFE); bytes.extend_from_slice(&encode_uleb(*fn_idx as usize)); }
             Instruction::Trap => { bytes.push(0xFD); }
@@ -1524,7 +1641,7 @@ mod tests {
         let key: [u8; 16] = [0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c];
         let plaintext: [u8; 16] = [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34];
         let ct = aes128_encrypt(&plaintext, &key);
-        let expected = hex_to_bytes("39 25 84 82 d2 72 36 14 e2 4a 08 8d 67 23 a7 85");
+        let expected = hex_to_bytes("39 25 84 1d 02 dc 09 fb dc 11 85 97 19 6a 0b 32");
         assert_eq!(&ct[..], &expected[..16], "AES-128 NIST");
     }
 
