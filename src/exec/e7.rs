@@ -465,6 +465,83 @@ pub fn chacha20_ctr(key: &[u8; 32], nonce: &[u8; 12], plaintext: &[u8]) -> Vec<u
 }
 
 // ---------------------------------------------------------------------------
+// ChaCha20-Poly1305 AEAD (RFC 7539 §2.8.2)
+// ---------------------------------------------------------------------------
+
+/// Encrypt plaintext with ChaCha20-Poly1305 AEAD.
+/// Returns ciphertext || 16-byte Poly1305 tag.
+/// Counter starts at 1 for encryption (RFC 7539 §2.8.2).
+pub fn chacha20_poly1305_encrypt(key: &[u8; 32], nonce: &[u8; 12], plaintext: &[u8], aad: &[u8]) -> Vec<u8> {
+    // Step 1: Generate Poly1305 key from counter=0 ChaCha20 block
+    let block0 = chacha20_block(key, nonce, 0);
+    let r = &block0[..16];
+    let s = &block0[16..32];
+
+    // Step 2: Encrypt plaintext with ChaCha20 starting counter=1
+    let ct = chacha20_ctr(key, nonce, plaintext);
+
+    // Step 3: Compute Poly1305 tag over AAD || padding || ciphertext || padding || len(AAD) || len(ct)
+    let mut input = Vec::new();
+    input.extend_from_slice(aad);
+    let aad_pad = (16 - (aad.len() % 16)) % 16;
+    for _ in 0..aad_pad { input.push(0u8); }
+    input.extend_from_slice(&ct);
+    let ct_pad = (16 - (ct.len() % 16)) % 16;
+    for _ in 0..ct_pad { input.push(0u8); }
+    input.extend_from_slice(&(aad.len() as u64).to_le_bytes());
+    input.extend_from_slice(&(ct.len() as u64).to_le_bytes());
+
+    let mut key_arr = [0u8; 32];
+    key_arr[..16].copy_from_slice(r);
+    key_arr[16..].copy_from_slice(s);
+    let tag = poly1305_mac(&input, &key_arr);
+
+    // Step 4: Output ciphertext || tag
+    let mut output = ct;
+    output.extend_from_slice(&tag);
+    output
+}
+
+/// Decrypt ChaCha20-Poly1305 AEAD ciphertext.
+/// ciphertext_and_tag = ciphertext || 16-byte tag.
+/// Returns plaintext if tag verification succeeds.
+pub fn chacha20_poly1305_decrypt(key: &[u8; 32], nonce: &[u8; 12], ciphertext_and_tag: &[u8], aad: &[u8]) -> Result<Vec<u8>> {
+    if ciphertext_and_tag.len() < 16 {
+        return Err(Error::Generic("ciphertext too short".into()));
+    }
+    let (ct, received_tag) = ciphertext_and_tag.split_at(ciphertext_and_tag.len() - 16);
+    let received_tag: [u8; 16] = received_tag.try_into().map_err(|_| Error::Generic("tag parse".into()))?;
+
+    // Step 1: Generate Poly1305 key from counter=0 block
+    let block0 = chacha20_block(key, nonce, 0);
+    let r = &block0[..16];
+    let s = &block0[16..32];
+
+    // Step 2: Compute Poly1305 tag and verify
+    let mut input = Vec::new();
+    input.extend_from_slice(aad);
+    let aad_pad = (16 - (aad.len() % 16)) % 16;
+    for _ in 0..aad_pad { input.push(0u8); }
+    input.extend_from_slice(ct);
+    let ct_pad = (16 - (ct.len() % 16)) % 16;
+    for _ in 0..ct_pad { input.push(0u8); }
+    input.extend_from_slice(&(aad.len() as u64).to_le_bytes());
+    input.extend_from_slice(&(ct.len() as u64).to_le_bytes());
+
+    let mut key_arr = [0u8; 32];
+    key_arr[..16].copy_from_slice(r);
+    key_arr[16..].copy_from_slice(s);
+    let computed_tag = poly1305_mac(&input, &key_arr);
+
+    if computed_tag != received_tag {
+        return Err(Error::Generic("tag mismatch".into()));
+    }
+
+    // Step 3: Decrypt
+    Ok(chacha20_ctr(key, nonce, ct))
+}
+
+// ---------------------------------------------------------------------------
 // BLAKE2s-256
 // ---------------------------------------------------------------------------
 
@@ -1385,9 +1462,48 @@ mod tests {
         let key = [0x42u8; 32];
         let nonce: [u8; 12] = [0u8; 12];
         let plaintext = b"Hello, world!";
-        let ct = chacha20_ctr(&key, &nonce, plaintext);
-        let pt = chacha20_ctr(&key, &nonce, &ct);
+        let aad: &[u8] = b"";
+
+        // Encrypt
+        let ct_and_tag = chacha20_poly1305_encrypt(&key, &nonce, plaintext, aad);
+        assert!(ct_and_tag.len() > 16, "ciphertext + tag");
+
+        // Decrypt and verify roundtrip
+        let pt = chacha20_poly1305_decrypt(&key, &nonce, &ct_and_tag, aad).expect("decrypt ok");
         assert_eq!(pt, plaintext, "AEAD plaintext roundtrip");
+
+        // Tampered ciphertext should fail
+        let mut tampered = ct_and_tag.clone();
+        tampered[0] ^= 0xff;
+        let result = chacha20_poly1305_decrypt(&key, &nonce, &tampered, aad);
+        assert!(result.is_err(), "tampered ciphertext rejected");
+    }
+
+    #[test]
+    fn test_chacha20_poly1305_aead_with_aad() {
+        // Test with non-empty AAD per RFC 7539 §2.8.2
+        let key = [0x00u8; 32];
+        let nonce: [u8; 12] = [0u8; 12];
+        let plaintext: [u8; 16] = [0u8; 16];
+        let aad: &[u8] = b"associated data";
+
+        let ct_and_tag = chacha20_poly1305_encrypt(&key, &nonce, &plaintext, aad);
+        let pt = chacha20_poly1305_decrypt(&key, &nonce, &ct_and_tag, aad).expect("decrypt ok");
+        assert_eq!(pt, plaintext, "AEAD with AAD roundtrip");
+    }
+
+    #[test]
+    fn test_chacha20_poly1305_aead_empty() {
+        // Empty plaintext, empty AAD
+        let key = [0x00u8; 32];
+        let nonce: [u8; 12] = [0u8; 12];
+        let plaintext: &[u8] = b"";
+        let aad: &[u8] = b"";
+
+        let ct_and_tag = chacha20_poly1305_encrypt(&key, &nonce, plaintext, aad);
+        assert_eq!(ct_and_tag.len(), 16, "empty plaintext: only 16-byte tag");
+        let pt = chacha20_poly1305_decrypt(&key, &nonce, &ct_and_tag, aad).expect("decrypt ok");
+        assert!(pt.is_empty(), "empty plaintext recovered");
     }
 
     // =====================================================================
