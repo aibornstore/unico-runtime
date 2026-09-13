@@ -518,6 +518,20 @@ impl U30Runtime {
             U30Op::Call { function: _, args: _, results: _ } => {
                 return Err(Error::Generic("U30X call not yet implemented".into()));
             }
+            U30Op::TableBr { table: _, index: _ } => {
+                return Err(Error::Generic("U30X tablebr not yet implemented".into()));
+            }
+            U30Op::Break { code } => {
+                let c = self.reg(regs, *code)?.as_u64()?;
+                return Err(Error::Generic(format!("U30X break {}", c)));
+            }
+            U30Op::Assert { cond, msg: _ } => {
+                let c = self.reg(regs, *cond)?.as_bool()?;
+                if !c {
+                    return Err(Error::Generic("U30X assertion failed".into()));
+                }
+            }
+            U30Op::Nop => {}
         }
         Ok(())
     }
@@ -587,6 +601,7 @@ mod tests {
             regions: vec![U30RegionDecl {
                 id: 0, size: 4, readable: true, writable: true, initial: vec![0; 4],
             }],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::U64],
                 results: vec![U30Type::U8],
@@ -626,6 +641,7 @@ mod tests {
     fn u30x_binary_sub_wraps() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U64],
@@ -651,6 +667,7 @@ mod tests {
     fn u30x_binary_mul_wraps() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U64],
@@ -676,6 +693,7 @@ mod tests {
     fn u30x_binary_xor_u8() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U8],
@@ -701,6 +719,7 @@ mod tests {
     fn u30x_binary_shl_u64() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U64],
@@ -726,6 +745,7 @@ mod tests {
     fn u30x_binary_shr_u64() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U64],
@@ -751,6 +771,7 @@ mod tests {
     fn u30x_binary_shr_u32() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U32],
@@ -776,6 +797,7 @@ mod tests {
     fn u30x_binary_add_wraps_u64() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U64],
@@ -801,6 +823,7 @@ mod tests {
     fn u30x_binary_add_wraps_u32() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U32],
@@ -826,6 +849,7 @@ mod tests {
     fn u30x_binary_sub_wraps_u32() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U32],
@@ -851,6 +875,7 @@ mod tests {
     fn u30x_binary_mul_wraps_u32() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U32],
@@ -876,6 +901,7 @@ mod tests {
     fn u30x_binary_and_u8() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U8],
@@ -901,6 +927,7 @@ mod tests {
     fn u30x_binary_or_u8() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U8],
@@ -926,6 +953,7 @@ mod tests {
     fn u30x_binary_eq_works() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::Bool],
@@ -951,6 +979,7 @@ mod tests {
     fn u30x_binary_lt_works() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::Bool],
@@ -983,6 +1012,7 @@ mod tests {
             regions: vec![U30RegionDecl {
                 id: 0, size: 16, readable: true, writable: false, initial: region.clone(),
             }],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U16, U30Type::U32, U30Type::U64],
@@ -1015,6 +1045,7 @@ mod tests {
             regions: vec![U30RegionDecl {
                 id: 0, size: 16, readable: true, writable: true, initial: vec![0; 16],
             }],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U8],
@@ -1053,6 +1084,7 @@ mod tests {
             regions: vec![U30RegionDecl {
                 id: 0, size: 2, readable: true, writable: true, initial: vec![0; 2],
             }],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![],
@@ -1078,6 +1110,7 @@ mod tests {
     fn u30x_verify_multiple_functions_fails() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![
                 U30Function {
                     params: vec![],
@@ -1107,6 +1140,7 @@ mod tests {
                 U30RegionDecl { id: 0, size: 4, readable: true, writable: true, initial: vec![] },
                 U30RegionDecl { id: 0, size: 8, readable: true, writable: true, initial: vec![] },
             ],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![],
@@ -1128,6 +1162,7 @@ mod tests {
     fn u30x_binary_shl_u32() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U32],
@@ -1153,6 +1188,7 @@ mod tests {
     fn u30x_binary_div_u64() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U64],
@@ -1178,6 +1214,7 @@ mod tests {
     fn u30x_binary_div_u32() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U32],
@@ -1203,6 +1240,7 @@ mod tests {
     fn u30x_binary_rem_u64() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U64],
@@ -1228,6 +1266,7 @@ mod tests {
     fn u30x_binary_rem_u32() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U32],
@@ -1253,6 +1292,7 @@ mod tests {
     fn u30x_binary_gt_u64() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::Bool],
@@ -1278,6 +1318,7 @@ mod tests {
     fn u30x_binary_ge_u64() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::Bool],
@@ -1303,6 +1344,7 @@ mod tests {
     fn u30x_select_works() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::Bool],
                 results: vec![U30Type::U64],
@@ -1333,6 +1375,7 @@ mod tests {
     fn u30x_div_by_zero_fails() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U64],
@@ -1358,6 +1401,7 @@ mod tests {
     fn u30x_i2f_works() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::U32],
                 results: vec![U30Type::F32],
@@ -1381,6 +1425,7 @@ mod tests {
     fn u30x_f2i_works() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::F32],
                 results: vec![U30Type::U64],
@@ -1404,6 +1449,7 @@ mod tests {
     fn u30x_trunc_f32_u64_works() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::F32],
                 results: vec![U30Type::U64],
@@ -1434,6 +1480,7 @@ mod tests {
     fn u30x_reinterpret_f32_u32() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::F32],
                 results: vec![U30Type::U32],
@@ -1458,6 +1505,7 @@ mod tests {
     fn u30x_reinterpret_u32_f32() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::U32],
                 results: vec![U30Type::F32],
@@ -1481,6 +1529,7 @@ mod tests {
     fn u30x_abs_u64_works() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::U64],
                 results: vec![U30Type::U64],
@@ -1504,6 +1553,7 @@ mod tests {
     fn u30x_neg_u32_works() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::U32],
                 results: vec![U30Type::U32],
@@ -1527,6 +1577,7 @@ mod tests {
     fn u30x_ctz_clz_popcnt() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::U64],
                 results: vec![U30Type::U64, U30Type::U64, U30Type::U64],
@@ -1555,6 +1606,7 @@ mod tests {
     fn u30x_rotr_works() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::U64],
                 results: vec![U30Type::U64],
@@ -1580,6 +1632,7 @@ mod tests {
     fn u30x_f32_comparisons() {
         let make_module = || U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::F32, U30Type::F32],
                 results: vec![U30Type::Bool],
@@ -1634,6 +1687,7 @@ mod tests {
         // FAdd: 1.0 + 2.0 = 3.0
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::F32, U30Type::F32],
                 results: vec![U30Type::F32],
@@ -1655,6 +1709,7 @@ mod tests {
     fn u30x_fsqrt_works() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::F32],
                 results: vec![U30Type::F32],
@@ -1676,6 +1731,7 @@ mod tests {
     fn u30x_fneg_works() {
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::F32],
                 results: vec![U30Type::F32],
@@ -1698,6 +1754,7 @@ mod tests {
         // ZExtI8U32: 255 -> 255
         let module = U30Module {
             regions: vec![],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![U30Type::U8],
                 results: vec![U30Type::U32],
@@ -1734,6 +1791,7 @@ mod tests {
                 U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: data.clone() },
                 U30RegionDecl { id: 1, size: 16, readable: true, writable: true, initial: vec![0; 16] },
             ],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U8],
@@ -1761,6 +1819,7 @@ mod tests {
     fn u30x_memfill_works() {
         let module = U30Module {
             regions: vec![U30RegionDecl { id: 0, size: 8, readable: true, writable: true, initial: vec![0; 8] }],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U64],
@@ -1789,6 +1848,7 @@ mod tests {
     fn u30x_memsize_works() {
         let module = U30Module {
             regions: vec![U30RegionDecl { id: 0, size: 64, readable: true, writable: true, initial: vec![] }],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U64],
@@ -1810,6 +1870,7 @@ mod tests {
     fn u30x_memgrow_works() {
         let module = U30Module {
             regions: vec![U30RegionDecl { id: 0, size: 8, readable: true, writable: true, initial: vec![1,2,3,4,5,6,7,8] }],
+            tables: vec![],
             functions: vec![U30Function {
                 params: vec![],
                 results: vec![U30Type::U64, U30Type::U64],
@@ -1830,5 +1891,80 @@ mod tests {
             .expect("memgrow");
         assert_eq!(out.results[0], U30Value::U64(8)); // old size
         assert_eq!(out.results[1], U30Value::U64(16)); // new size
+    }
+
+    #[test]
+    fn u30x_nop_works() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::Nop,
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![0] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("nop");
+        assert_eq!(out.results, vec![U30Value::U64(42)]);
+    }
+
+    #[test]
+    fn u30x_assert_passes() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        U30Op::Assert { cond: 0, msg: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("assert true");
+        assert_eq!(out.results, vec![]);
+    }
+
+    #[test]
+    fn u30x_assert_fails() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(false) },
+                        U30Op::Assert { cond: 0, msg: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("assert false should fail");
+        assert!(err.to_string().contains("assertion failed"));
     }
 }

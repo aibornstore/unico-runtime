@@ -104,6 +104,12 @@ pub struct U30RegionDecl {
     pub initial: Vec<u8>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct U30TableDecl {
+    pub id: u32,
+    pub targets: Vec<usize>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum U30BinaryOp {
     AddWrapU64,
@@ -191,6 +197,10 @@ pub enum U30Op {
     MemSize { dst: u32, region: u32 },
     MemGrow { dst: u32, region: u32, delta: u32 },
     Call { function: u32, args: Vec<u32>, results: Vec<u32> },
+    TableBr { table: u32, index: u32 },
+    Break { code: u32 },
+    Assert { cond: u32, msg: u32 },
+    Nop,
     LoadU8 { dst: u32, region: u32, offset: u32 },
     StoreU8 { region: u32, offset: u32, src: u32 },
     LoadU16 { dst: u32, region: u32, offset: u32 },
@@ -226,6 +236,7 @@ pub struct U30Function {
 #[derive(Debug, Clone, PartialEq)]
 pub struct U30Module {
     pub regions: Vec<U30RegionDecl>,
+    pub tables: Vec<U30TableDecl>,
     pub functions: Vec<U30Function>,
     pub entry_function: usize,
 }
@@ -244,8 +255,19 @@ impl U30Module {
                 return Err(Error::Verification(format!("U30X region {} initializer overflow", region.id)));
             }
         }
+        let mut table_ids = BTreeSet::new();
+        for table in &self.tables {
+            if !table_ids.insert(table.id) {
+                return Err(Error::Verification(format!("U30X duplicate table {}", table.id)));
+            }
+            for &target in &table.targets {
+                if target >= self.functions.len() {
+                    return Err(Error::Verification(format!("U30X table {} has invalid target block", table.id)));
+                }
+            }
+        }
         for (fn_index, function) in self.functions.iter().enumerate() {
-            self.verify_function(fn_index, function, &region_ids)?;
+            self.verify_function(fn_index, function, &region_ids, &table_ids)?;
         }
         Ok(())
     }
@@ -255,6 +277,7 @@ impl U30Module {
         fn_index: usize,
         function: &U30Function,
         region_ids: &BTreeSet<u32>,
+        table_ids: &BTreeSet<u32>,
     ) -> Result<()> {
         if function.blocks.is_empty() || function.entry_block >= function.blocks.len() {
             return Err(Error::Verification(format!("U30X function {fn_index} has invalid entry block")));
@@ -324,7 +347,11 @@ impl U30Module {
                     | U30Op::StoreU64 { .. }
                     | U30Op::MemCopy { .. }
                     | U30Op::MemFill { .. }
-                    | U30Op::Call { .. } => None,
+                    | U30Op::Call { .. }
+                    | U30Op::TableBr { .. }
+                    | U30Op::Break { .. }
+                    | U30Op::Assert { .. }
+                    | U30Op::Nop => None,
                 };
                 if let Some(dst) = dst {
                     if !defined.insert(dst) {
@@ -534,6 +561,25 @@ impl U30Module {
                             }
                         }
                     }
+                    U30Op::TableBr { table, index } => {
+                        if !table_ids.contains(table) {
+                            return Err(Error::Verification(format!("U30X unknown table {}", table)));
+                        }
+                        if !defined.contains(index) {
+                            return Err(Error::Verification(format!("U30X undefined table index")));
+                        }
+                    }
+                    U30Op::Break { code } => {
+                        if !defined.contains(code) {
+                            return Err(Error::Verification(format!("U30X undefined break code")));
+                        }
+                    }
+                    U30Op::Assert { cond, msg: _ } => {
+                        if !defined.contains(cond) {
+                            return Err(Error::Verification(format!("U30X undefined assert cond")));
+                        }
+                    }
+                    U30Op::Nop => {}
                 }
             }
             self.verify_terminator(fn_index, block_index, function, &block.terminator)?;
