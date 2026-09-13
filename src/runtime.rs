@@ -147,6 +147,13 @@ impl U30Runtime {
                 let value = self.binary(*op, av, bv)?;
                 regs.insert(*dst, value);
             }
+            U30Op::Select { dst, cond, a, b } => {
+                let cond_val = self.reg(regs, *cond)?.as_bool()?;
+                let av = self.reg(regs, *a)?.clone();
+                let bv = self.reg(regs, *b)?.clone();
+                let value = if cond_val { av } else { bv };
+                regs.insert(*dst, value);
+            }
             U30Op::LoadU8 { dst, region, offset } => {
                 let offset = self.reg(regs, *offset)?.as_u64()? as usize;
                 let state = regions.get(region)
@@ -269,8 +276,29 @@ impl U30Runtime {
             U30BinaryOp::OrU8 => U30Value::U8(a.as_u8()? | b.as_u8()?),
             U30BinaryOp::XorU8 => U30Value::U8(a.as_u8()? ^ b.as_u8()?),
             U30BinaryOp::ShlU64 => U30Value::U64(a.as_u64()?.wrapping_shl(b.as_u64()? as u32)),
+            U30BinaryOp::ShlU32 => U30Value::U32(a.as_u32()?.wrapping_shl(b.as_u32()? as u32)),
             U30BinaryOp::ShrU64 => U30Value::U64(a.as_u64()?.wrapping_shr(b.as_u64()? as u32)),
             U30BinaryOp::ShrU32 => U30Value::U32(a.as_u32()?.wrapping_shr(b.as_u32()? as u32)),
+            U30BinaryOp::DivU64 => {
+                let bv = b.as_u64()?;
+                if bv == 0 { return Err(Error::Generic("U30X div by zero".into())); }
+                U30Value::U64(a.as_u64()? / bv)
+            }
+            U30BinaryOp::DivU32 => {
+                let bv = b.as_u32()?;
+                if bv == 0 { return Err(Error::Generic("U30X div by zero".into())); }
+                U30Value::U32(a.as_u32()? / bv)
+            }
+            U30BinaryOp::RemU64 => {
+                let bv = b.as_u64()?;
+                if bv == 0 { return Err(Error::Generic("U30X rem by zero".into())); }
+                U30Value::U64(a.as_u64()? % bv)
+            }
+            U30BinaryOp::RemU32 => {
+                let bv = b.as_u32()?;
+                if bv == 0 { return Err(Error::Generic("U30X rem by zero".into())); }
+                U30Value::U32(a.as_u32()? % bv)
+            }
             U30BinaryOp::Eq => {
                 if a.value_type() != b.value_type() {
                     return Err(Error::Generic("U30X eq type mismatch".into()));
@@ -278,6 +306,8 @@ impl U30Runtime {
                 U30Value::Bool(a == b)
             }
             U30BinaryOp::LtU64 => U30Value::Bool(a.as_u64()? < b.as_u64()?),
+            U30BinaryOp::GtU64 => U30Value::Bool(a.as_u64()? > b.as_u64()?),
+            U30BinaryOp::GeU64 => U30Value::Bool(a.as_u64()? >= b.as_u64()?),
         };
         Ok(value)
     }
@@ -828,5 +858,235 @@ mod tests {
             .execute_experimental(&module, &[])
             .expect_err("duplicate region id");
         assert!(err.to_string().contains("duplicate region"));
+    }
+
+    #[test]
+    fn u30x_binary_shl_u32() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(1) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(4) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::ShlU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("shl u32");
+        assert_eq!(out.results, vec![U30Value::U32(16)]);
+    }
+
+    #[test]
+    fn u30x_binary_div_u64() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(100) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(7) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::DivU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("div u64");
+        assert_eq!(out.results, vec![U30Value::U64(14)]); // 100 / 7 = 14
+    }
+
+    #[test]
+    fn u30x_binary_div_u32() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(100) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(7) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::DivU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("div u32");
+        assert_eq!(out.results, vec![U30Value::U32(14)]); // 100 / 7 = 14
+    }
+
+    #[test]
+    fn u30x_binary_rem_u64() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(100) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(7) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::RemU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("rem u64");
+        assert_eq!(out.results, vec![U30Value::U64(2)]); // 100 % 7 = 2
+    }
+
+    #[test]
+    fn u30x_binary_rem_u32() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(100) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(7) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::RemU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("rem u32");
+        assert_eq!(out.results, vec![U30Value::U32(2)]); // 100 % 7 = 2
+    }
+
+    #[test]
+    fn u30x_binary_gt_u64() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(5) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(3) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::GtU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("gt");
+        assert_eq!(out.results, vec![U30Value::Bool(true)]);
+    }
+
+    #[test]
+    fn u30x_binary_ge_u64() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(3) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(3) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::GeU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("ge");
+        assert_eq!(out.results, vec![U30Value::Bool(true)]);
+    }
+
+    #[test]
+    fn u30x_select_works() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::Bool],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 1, value: U30Value::U64(10) },
+                        U30Op::Const { dst: 2, value: U30Value::U64(20) },
+                        U30Op::Select { dst: 3, cond: 0, a: 1, b: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::Bool(true)])
+            .expect("select true");
+        assert_eq!(out.results, vec![U30Value::U64(10)]);
+
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::Bool(false)])
+            .expect("select false");
+        assert_eq!(out.results, vec![U30Value::U64(20)]);
+    }
+
+    #[test]
+    fn u30x_div_by_zero_fails() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(100) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(0) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::DivU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("div by zero must fail");
+        assert!(err.to_string().contains("div by zero"));
     }
 }

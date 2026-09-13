@@ -96,16 +96,24 @@ pub enum U30BinaryOp {
     OrU8,
     XorU8,
     ShlU64,
+    ShlU32,
     ShrU64,
     ShrU32,
+    DivU64,
+    DivU32,
+    RemU64,
+    RemU32,
     Eq,
     LtU64,
+    GtU64,
+    GeU64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum U30Op {
     Const { dst: u32, value: U30Value },
     Binary { dst: u32, op: U30BinaryOp, a: u32, b: u32 },
+    Select { dst: u32, cond: u32, a: u32, b: u32 },
     LoadU8 { dst: u32, region: u32, offset: u32 },
     StoreU8 { region: u32, offset: u32, src: u32 },
     LoadU16 { dst: u32, region: u32, offset: u32 },
@@ -180,6 +188,7 @@ impl U30Module {
                 let dst = match op {
                     U30Op::Const { dst, .. }
                     | U30Op::Binary { dst, .. }
+                    | U30Op::Select { dst, .. }
                     | U30Op::LoadU8 { dst, .. }
                     | U30Op::LoadU16 { dst, .. }
                     | U30Op::LoadU32 { dst, .. }
@@ -200,6 +209,23 @@ impl U30Module {
                 match op {
                     U30Op::Const { .. } => {}
                     U30Op::Binary { a, b, .. } => {
+                        if !defined.contains(a) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{a}"
+                            )));
+                        }
+                        if !defined.contains(b) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{b}"
+                            )));
+                        }
+                    }
+                    U30Op::Select { cond, a, b, .. } => {
+                        if !defined.contains(cond) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined condition value %{cond}"
+                            )));
+                        }
                         if !defined.contains(a) {
                             return Err(Error::Verification(format!(
                                 "U30X function {fn_index} block {block_index}: undefined source value %{a}"
