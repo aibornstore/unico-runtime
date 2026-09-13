@@ -178,6 +178,15 @@ impl U30Runtime {
                 let v = self.reg(regs, *src)?.as_f32()?;
                 regs.insert(*dst, U30Value::U64(v as u64));
             }
+            U30Op::TruncF32U64 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_f32()?;
+                let result = if v.is_nan() || v < 0.0 {
+                    0
+                } else {
+                    v.min(u64::MAX as f32) as u64
+                };
+                regs.insert(*dst, U30Value::U64(result));
+            }
             U30Op::LoadU8 { dst, region, offset } => {
                 let offset = self.reg(regs, *offset)?.as_u64()? as usize;
                 let state = regions.get(region)
@@ -1164,5 +1173,35 @@ mod tests {
             .execute_experimental(&module, &[U30Value::F32(99.9)])
             .expect("f2i");
         assert_eq!(out.results, vec![U30Value::U64(99)]);
+    }
+
+    #[test]
+    fn u30x_trunc_f32_u64_works() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::F32],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::TruncF32U64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // Normal truncation
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::F32(123.9)])
+            .expect("trunc");
+        assert_eq!(out.results, vec![U30Value::U64(123)]);
+
+        // NaN -> 0
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::F32(f32::NAN)])
+            .expect("trunc nan");
+        assert_eq!(out.results, vec![U30Value::U64(0)]);
     }
 }
