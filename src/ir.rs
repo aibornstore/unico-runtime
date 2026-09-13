@@ -196,18 +196,56 @@ impl U30Module {
                         )));
                     }
                 }
+                // Validate that operands reference defined values
                 match op {
-                    U30Op::LoadU8 { region, .. } | U30Op::StoreU8 { region, .. }
-                    | U30Op::LoadU16 { region, .. } | U30Op::StoreU16 { region, .. }
-                    | U30Op::LoadU32 { region, .. } | U30Op::StoreU32 { region, .. }
-                    | U30Op::LoadU64 { region, .. } | U30Op::StoreU64 { region, .. } => {
-                        if !region_ids.contains(region) {
+                    U30Op::Const { .. } => {}
+                    U30Op::Binary { a, b, .. } => {
+                        if !defined.contains(a) {
                             return Err(Error::Verification(format!(
-                                "U30X function {fn_index} references unknown region {region}"
+                                "U30X function {fn_index} block {block_index}: undefined source value %{a}"
+                            )));
+                        }
+                        if !defined.contains(b) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{b}"
                             )));
                         }
                     }
-                    _ => {}
+                    U30Op::LoadU8 { region, offset, .. }
+                    | U30Op::LoadU16 { region, offset, .. }
+                    | U30Op::LoadU32 { region, offset, .. }
+                    | U30Op::LoadU64 { region, offset, .. } => {
+                        if !region_ids.contains(region) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: unknown region {region}"
+                            )));
+                        }
+                        if !defined.contains(offset) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined offset value %{offset}"
+                            )));
+                        }
+                    }
+                    U30Op::StoreU8 { region, offset, src }
+                    | U30Op::StoreU16 { region, offset, src }
+                    | U30Op::StoreU32 { region, offset, src }
+                    | U30Op::StoreU64 { region, offset, src } => {
+                        if !region_ids.contains(region) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: unknown region {region}"
+                            )));
+                        }
+                        if !defined.contains(offset) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined offset value %{offset}"
+                            )));
+                        }
+                        if !defined.contains(src) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined src value %{src}"
+                            )));
+                        }
+                    }
                 }
             }
             self.verify_terminator(fn_index, block_index, function, &block.terminator)?;
