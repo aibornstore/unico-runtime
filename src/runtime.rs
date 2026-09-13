@@ -154,6 +154,22 @@ impl U30Runtime {
                 let value = if cond_val { av } else { bv };
                 regs.insert(*dst, value);
             }
+            U30Op::NotU8 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u8()?;
+                regs.insert(*dst, U30Value::U8(!v));
+            }
+            U30Op::NotU16 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u16()?;
+                regs.insert(*dst, U30Value::U16(!v));
+            }
+            U30Op::NotU32 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u32()?;
+                regs.insert(*dst, U30Value::U32(!v));
+            }
+            U30Op::NotU64 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u64()?;
+                regs.insert(*dst, U30Value::U64(!v));
+            }
             U30Op::LoadU8 { dst, region, offset } => {
                 let offset = self.reg(regs, *offset)?.as_u64()? as usize;
                 let state = regions.get(region)
@@ -308,6 +324,12 @@ impl U30Runtime {
             U30BinaryOp::LtU64 => U30Value::Bool(a.as_u64()? < b.as_u64()?),
             U30BinaryOp::GtU64 => U30Value::Bool(a.as_u64()? > b.as_u64()?),
             U30BinaryOp::GeU64 => U30Value::Bool(a.as_u64()? >= b.as_u64()?),
+            U30BinaryOp::LeU64 => U30Value::Bool(a.as_u64()? <= b.as_u64()?),
+            U30BinaryOp::LeU32 => U30Value::Bool(a.as_u32()? <= b.as_u32()?),
+            U30BinaryOp::MinU64 => U30Value::U64(a.as_u64()?.min(b.as_u64()?)),
+            U30BinaryOp::MaxU64 => U30Value::U64(a.as_u64()?.max(b.as_u64()?)),
+            U30BinaryOp::MinU32 => U30Value::U32(a.as_u32()?.min(b.as_u32()?)),
+            U30BinaryOp::MaxU32 => U30Value::U32(a.as_u32()?.max(b.as_u32()?)),
         };
         Ok(value)
     }

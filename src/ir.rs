@@ -107,6 +107,12 @@ pub enum U30BinaryOp {
     LtU64,
     GtU64,
     GeU64,
+    LeU64,
+    LeU32,
+    MinU64,
+    MaxU64,
+    MinU32,
+    MaxU32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +120,10 @@ pub enum U30Op {
     Const { dst: u32, value: U30Value },
     Binary { dst: u32, op: U30BinaryOp, a: u32, b: u32 },
     Select { dst: u32, cond: u32, a: u32, b: u32 },
+    NotU8 { dst: u32, src: u32 },
+    NotU16 { dst: u32, src: u32 },
+    NotU32 { dst: u32, src: u32 },
+    NotU64 { dst: u32, src: u32 },
     LoadU8 { dst: u32, region: u32, offset: u32 },
     StoreU8 { region: u32, offset: u32, src: u32 },
     LoadU16 { dst: u32, region: u32, offset: u32 },
@@ -189,6 +199,10 @@ impl U30Module {
                     U30Op::Const { dst, .. }
                     | U30Op::Binary { dst, .. }
                     | U30Op::Select { dst, .. }
+                    | U30Op::NotU8 { dst, .. }
+                    | U30Op::NotU16 { dst, .. }
+                    | U30Op::NotU32 { dst, .. }
+                    | U30Op::NotU64 { dst, .. }
                     | U30Op::LoadU8 { dst, .. }
                     | U30Op::LoadU16 { dst, .. }
                     | U30Op::LoadU32 { dst, .. }
@@ -234,6 +248,16 @@ impl U30Module {
                         if !defined.contains(b) {
                             return Err(Error::Verification(format!(
                                 "U30X function {fn_index} block {block_index}: undefined source value %{b}"
+                            )));
+                        }
+                    }
+                    U30Op::NotU8 { src, .. }
+                    | U30Op::NotU16 { src, .. }
+                    | U30Op::NotU32 { src, .. }
+                    | U30Op::NotU64 { src, .. } => {
+                        if !defined.contains(src) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{src}"
                             )));
                         }
                     }
