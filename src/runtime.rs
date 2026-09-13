@@ -280,6 +280,84 @@ impl U30Runtime {
                 let bv = self.reg(regs, *b)?.as_f32()?;
                 regs.insert(*dst, U30Value::Bool(av >= bv));
             }
+            U30Op::FAdd { dst, a, b } => {
+                let av = self.reg(regs, *a)?.as_f32()?;
+                let bv = self.reg(regs, *b)?.as_f32()?;
+                regs.insert(*dst, U30Value::F32(av + bv));
+            }
+            U30Op::FSub { dst, a, b } => {
+                let av = self.reg(regs, *a)?.as_f32()?;
+                let bv = self.reg(regs, *b)?.as_f32()?;
+                regs.insert(*dst, U30Value::F32(av - bv));
+            }
+            U30Op::FMul { dst, a, b } => {
+                let av = self.reg(regs, *a)?.as_f32()?;
+                let bv = self.reg(regs, *b)?.as_f32()?;
+                regs.insert(*dst, U30Value::F32(av * bv));
+            }
+            U30Op::FDiv { dst, a, b } => {
+                let av = self.reg(regs, *a)?.as_f32()?;
+                let bv = self.reg(regs, *b)?.as_f32()?;
+                regs.insert(*dst, U30Value::F32(av / bv));
+            }
+            U30Op::FSqrt { dst, src } => {
+                let v = self.reg(regs, *src)?.as_f32()?;
+                regs.insert(*dst, U30Value::F32(v.sqrt()));
+            }
+            U30Op::FAbs { dst, src } => {
+                let v = self.reg(regs, *src)?.as_f32()?;
+                regs.insert(*dst, U30Value::F32(v.abs()));
+            }
+            U30Op::FNeg { dst, src } => {
+                let v = self.reg(regs, *src)?.as_f32()?;
+                regs.insert(*dst, U30Value::F32(-v));
+            }
+            U30Op::FMin { dst, a, b } => {
+                let av = self.reg(regs, *a)?.as_f32()?;
+                let bv = self.reg(regs, *b)?.as_f32()?;
+                regs.insert(*dst, U30Value::F32(av.min(bv)));
+            }
+            U30Op::FMax { dst, a, b } => {
+                let av = self.reg(regs, *a)?.as_f32()?;
+                let bv = self.reg(regs, *b)?.as_f32()?;
+                regs.insert(*dst, U30Value::F32(av.max(bv)));
+            }
+            U30Op::ZExtI8U16 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u8()?;
+                regs.insert(*dst, U30Value::U16(v as u16));
+            }
+            U30Op::ZExtI8U32 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u8()?;
+                regs.insert(*dst, U30Value::U32(v as u32));
+            }
+            U30Op::ZExtI8U64 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u8()?;
+                regs.insert(*dst, U30Value::U64(v as u64));
+            }
+            U30Op::ZExtI16U32 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u16()?;
+                regs.insert(*dst, U30Value::U32(v as u32));
+            }
+            U30Op::ZExtI16U64 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u16()?;
+                regs.insert(*dst, U30Value::U64(v as u64));
+            }
+            U30Op::ZExtI32U64 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u32()?;
+                regs.insert(*dst, U30Value::U64(v as u64));
+            }
+            U30Op::TruncU64U32 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u64()?;
+                regs.insert(*dst, U30Value::U32(v as u32));
+            }
+            U30Op::TruncU64U16 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u64()?;
+                regs.insert(*dst, U30Value::U16(v as u16));
+            }
+            U30Op::TruncU32U16 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u32()?;
+                regs.insert(*dst, U30Value::U16(v as u16));
+            }
             U30Op::LoadU8 { dst, region, offset } => {
                 let offset = self.reg(regs, *offset)?.as_u64()? as usize;
                 let state = regions.get(region)
@@ -385,6 +463,60 @@ impl U30Runtime {
                     return Err(Error::Generic("U30X store.u64 out of bounds".into()));
                 }
                 state.bytes[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+            }
+            U30Op::MemCopy { dst_region, dst_offset, src_region, src_offset, size } => {
+                let dst_off = self.reg(regs, *dst_offset)?.as_u64()? as usize;
+                let src_off = self.reg(regs, *src_offset)?.as_u64()? as usize;
+                let n = self.reg(regs, *size)?.as_u64()? as usize;
+                let src_readable = regions.get(src_region)
+                    .map(|s| s.readable)
+                    .ok_or_else(|| Error::Generic(format!("U30X missing src region")))?;
+                if !src_readable {
+                    return Err(Error::Generic("U30X memcopy src not readable".into()));
+                }
+                let dst_writable = regions.get(dst_region)
+                    .map(|s| s.writable)
+                    .ok_or_else(|| Error::Generic(format!("U30X missing dst region")))?;
+                if !dst_writable {
+                    return Err(Error::Generic("U30X memcopy dst not writable".into()));
+                }
+                let src_len = regions.get(src_region).unwrap().bytes.len();
+                let dst_len = regions.get(dst_region).unwrap().bytes.len();
+                if src_off + n > src_len || dst_off + n > dst_len {
+                    return Err(Error::Generic("U30X memcopy out of bounds".into()));
+                }
+                let data = regions.get(src_region).unwrap().bytes[src_off..src_off+n].to_vec();
+                regions.get_mut(dst_region).unwrap().bytes[dst_off..dst_off+n].copy_from_slice(&data);
+            }
+            U30Op::MemFill { region, offset, value, size } => {
+                let off = self.reg(regs, *offset)?.as_u64()? as usize;
+                let val = self.reg(regs, *value)?.as_u32()? as u8;
+                let n = self.reg(regs, *size)?.as_u64()? as usize;
+                let state = regions.get_mut(region)
+                    .ok_or_else(|| Error::Generic(format!("U30X missing region")))?;
+                if !state.writable {
+                    return Err(Error::Generic("U30X memfill not writable".into()));
+                }
+                if off + n > state.bytes.len() {
+                    return Err(Error::Generic("U30X memfill out of bounds".into()));
+                }
+                state.bytes[off..off+n].fill(val);
+            }
+            U30Op::MemSize { dst, region } => {
+                let state = regions.get(region)
+                    .ok_or_else(|| Error::Generic(format!("U30X missing region")))?;
+                regs.insert(*dst, U30Value::U64(state.bytes.len() as u64));
+            }
+            U30Op::MemGrow { dst, region, delta } => {
+                let d = self.reg(regs, *delta)?.as_u64()? as usize;
+                let state = regions.get_mut(region)
+                    .ok_or_else(|| Error::Generic(format!("U30X missing region")))?;
+                let old_size = state.bytes.len();
+                state.bytes.resize(old_size + d, 0);
+                regs.insert(*dst, U30Value::U64(old_size as u64));
+            }
+            U30Op::Call { function: _, args: _, results: _ } => {
+                return Err(Error::Generic("U30X call not yet implemented".into()));
             }
         }
         Ok(())
@@ -1495,5 +1627,208 @@ mod tests {
             .execute_experimental(&m, &[U30Value::F32(5.0), U30Value::F32(5.0)])
             .expect("feq");
         assert_eq!(out.results[0], U30Value::Bool(true));
+    }
+
+    #[test]
+    fn u30x_f32_arithmetic() {
+        // FAdd: 1.0 + 2.0 = 3.0
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::F32, U30Type::F32],
+                results: vec![U30Type::F32],
+                blocks: vec![U30Block {
+                    ops: vec![U30Op::FAdd { dst: 2, a: 0, b: 1 }],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::F32(1.0), U30Value::F32(2.0)])
+            .expect("fadd");
+        assert_eq!(out.results, vec![U30Value::F32(3.0)]);
+    }
+
+    #[test]
+    fn u30x_fsqrt_works() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::F32],
+                results: vec![U30Type::F32],
+                blocks: vec![U30Block {
+                    ops: vec![U30Op::FSqrt { dst: 1, src: 0 }],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::F32(4.0)])
+            .expect("fsqrt");
+        assert!((out.results[0].as_f32().unwrap() - 2.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn u30x_fneg_works() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::F32],
+                results: vec![U30Type::F32],
+                blocks: vec![U30Block {
+                    ops: vec![U30Op::FNeg { dst: 1, src: 0 }],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::F32(5.0)])
+            .expect("fneg");
+        assert_eq!(out.results, vec![U30Value::F32(-5.0)]);
+    }
+
+    #[test]
+    fn u30x_zext_trunc() {
+        // ZExtI8U32: 255 -> 255
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U8],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![U30Op::ZExtI8U32 { dst: 1, src: 0 }],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::U8(255)])
+            .expect("zext");
+        assert_eq!(out.results, vec![U30Value::U32(255)]);
+
+        // TruncU64U32: 0x1_0000_0000 -> 0
+        let mut m = module.clone();
+        m.functions[0].params = vec![U30Type::U64];
+        m.functions[0].results = vec![U30Type::U32];
+        m.functions[0].blocks[0].ops = vec![U30Op::TruncU64U32 { dst: 1, src: 0 }];
+        let out = U30Runtime::default()
+            .execute_experimental(&m, &[U30Value::U64(0x1_0000_0000)])
+            .expect("trunc");
+        assert_eq!(out.results, vec![U30Value::U32(0)]);
+    }
+
+    #[test]
+    fn u30x_memcopy_works() {
+        let mut data = vec![0u8; 16];
+        data[4..8].copy_from_slice(&[1, 2, 3, 4]);
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: data.clone() },
+                U30RegionDecl { id: 1, size: 16, readable: true, writable: true, initial: vec![0; 16] },
+            ],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U8],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(4) },
+                        U30Op::Const { dst: 2, value: U30Value::U32(2) },
+                        U30Op::MemCopy { dst_region: 1, dst_offset: 0, src_region: 0, src_offset: 1, size: 2 },
+                        U30Op::LoadU8 { dst: 3, region: 1, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("memcopy");
+        assert_eq!(out.results, vec![U30Value::U8(1)]);
+    }
+
+    #[test]
+    fn u30x_memfill_works() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 8, readable: true, writable: true, initial: vec![0; 8] }],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0xAB) },
+                        U30Op::Const { dst: 2, value: U30Value::U32(8) },
+                        // memfill: fill 8 bytes with 0xAB -> 0xABABABABABABABAB
+                        U30Op::MemFill { region: 0, offset: 0, value: 1, size: 2 },
+                        U30Op::LoadU64 { dst: 3, region: 0, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("memfill");
+        assert_eq!(out.results, vec![U30Value::U64(0xABAB_ABAB_ABAB_ABAB)]);
+    }
+
+    #[test]
+    fn u30x_memsize_works() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 64, readable: true, writable: true, initial: vec![] }],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![U30Op::MemSize { dst: 0, region: 0 }],
+                    terminator: U30Terminator::Ret { values: vec![0] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("memsize");
+        assert_eq!(out.results, vec![U30Value::U64(64)]);
+    }
+
+    #[test]
+    fn u30x_memgrow_works() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 8, readable: true, writable: true, initial: vec![1,2,3,4,5,6,7,8] }],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64, U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(8) },
+                        U30Op::MemGrow { dst: 1, region: 0, delta: 0 },
+                        U30Op::MemSize { dst: 2, region: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1, 2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("memgrow");
+        assert_eq!(out.results[0], U30Value::U64(8)); // old size
+        assert_eq!(out.results[1], U30Value::U64(16)); // new size
     }
 }

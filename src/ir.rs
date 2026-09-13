@@ -168,6 +168,29 @@ pub enum U30Op {
     FGt { dst: u32, a: u32, b: u32 },
     FLe { dst: u32, a: u32, b: u32 },
     FGe { dst: u32, a: u32, b: u32 },
+    FAdd { dst: u32, a: u32, b: u32 },
+    FSub { dst: u32, a: u32, b: u32 },
+    FMul { dst: u32, a: u32, b: u32 },
+    FDiv { dst: u32, a: u32, b: u32 },
+    FSqrt { dst: u32, src: u32 },
+    FAbs { dst: u32, src: u32 },
+    FNeg { dst: u32, src: u32 },
+    FMin { dst: u32, a: u32, b: u32 },
+    FMax { dst: u32, a: u32, b: u32 },
+    ZExtI8U16 { dst: u32, src: u32 },
+    ZExtI8U32 { dst: u32, src: u32 },
+    ZExtI8U64 { dst: u32, src: u32 },
+    ZExtI16U32 { dst: u32, src: u32 },
+    ZExtI16U64 { dst: u32, src: u32 },
+    ZExtI32U64 { dst: u32, src: u32 },
+    TruncU64U32 { dst: u32, src: u32 },
+    TruncU64U16 { dst: u32, src: u32 },
+    TruncU32U16 { dst: u32, src: u32 },
+    MemCopy { dst_region: u32, dst_offset: u32, src_region: u32, src_offset: u32, size: u32 },
+    MemFill { region: u32, offset: u32, value: u32, size: u32 },
+    MemSize { dst: u32, region: u32 },
+    MemGrow { dst: u32, region: u32, delta: u32 },
+    Call { function: u32, args: Vec<u32>, results: Vec<u32> },
     LoadU8 { dst: u32, region: u32, offset: u32 },
     StoreU8 { region: u32, offset: u32, src: u32 },
     LoadU16 { dst: u32, region: u32, offset: u32 },
@@ -271,6 +294,26 @@ impl U30Module {
                     | U30Op::FGt { dst, .. }
                     | U30Op::FLe { dst, .. }
                     | U30Op::FGe { dst, .. }
+                    | U30Op::FAdd { dst, .. }
+                    | U30Op::FSub { dst, .. }
+                    | U30Op::FMul { dst, .. }
+                    | U30Op::FDiv { dst, .. }
+                    | U30Op::FSqrt { dst, .. }
+                    | U30Op::FAbs { dst, .. }
+                    | U30Op::FNeg { dst, .. }
+                    | U30Op::FMin { dst, .. }
+                    | U30Op::FMax { dst, .. }
+                    | U30Op::ZExtI8U16 { dst, .. }
+                    | U30Op::ZExtI8U32 { dst, .. }
+                    | U30Op::ZExtI8U64 { dst, .. }
+                    | U30Op::ZExtI16U32 { dst, .. }
+                    | U30Op::ZExtI16U64 { dst, .. }
+                    | U30Op::ZExtI32U64 { dst, .. }
+                    | U30Op::TruncU64U32 { dst, .. }
+                    | U30Op::TruncU64U16 { dst, .. }
+                    | U30Op::TruncU32U16 { dst, .. }
+                    | U30Op::MemSize { dst, .. }
+                    | U30Op::MemGrow { dst, .. }
                     | U30Op::LoadU8 { dst, .. }
                     | U30Op::LoadU16 { dst, .. }
                     | U30Op::LoadU32 { dst, .. }
@@ -278,7 +321,10 @@ impl U30Module {
                     U30Op::StoreU8 { .. }
                     | U30Op::StoreU16 { .. }
                     | U30Op::StoreU32 { .. }
-                    | U30Op::StoreU64 { .. } => None,
+                    | U30Op::StoreU64 { .. }
+                    | U30Op::MemCopy { .. }
+                    | U30Op::MemFill { .. }
+                    | U30Op::Call { .. } => None,
                 };
                 if let Some(dst) = dst {
                     if !defined.insert(dst) {
@@ -408,6 +454,84 @@ impl U30Module {
                             return Err(Error::Verification(format!(
                                 "U30X function {fn_index} block {block_index}: undefined src value %{src}"
                             )));
+                        }
+                    }
+                    U30Op::FAdd { a, b, .. }
+                    | U30Op::FSub { a, b, .. }
+                    | U30Op::FMul { a, b, .. }
+                    | U30Op::FDiv { a, b, .. }
+                    | U30Op::FMin { a, b, .. }
+                    | U30Op::FMax { a, b, .. } => {
+                        if !defined.contains(a) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined a value %{a}"
+                            )));
+                        }
+                        if !defined.contains(b) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined b value %{b}"
+                            )));
+                        }
+                    }
+                    U30Op::FSqrt { src, .. }
+                    | U30Op::FAbs { src, .. }
+                    | U30Op::FNeg { src, .. }
+                    | U30Op::ZExtI8U16 { src, .. }
+                    | U30Op::ZExtI8U32 { src, .. }
+                    | U30Op::ZExtI8U64 { src, .. }
+                    | U30Op::ZExtI16U32 { src, .. }
+                    | U30Op::ZExtI16U64 { src, .. }
+                    | U30Op::ZExtI32U64 { src, .. }
+                    | U30Op::TruncU64U32 { src, .. }
+                    | U30Op::TruncU64U16 { src, .. }
+                    | U30Op::TruncU32U16 { src, .. } => {
+                        if !defined.contains(src) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined src value %{src}"
+                            )));
+                        }
+                    }
+                    U30Op::MemCopy { dst_region, dst_offset, src_region, src_offset, size } => {
+                        if !region_ids.contains(dst_region) {
+                            return Err(Error::Verification(format!("U30X unknown dst region")));
+                        }
+                        if !region_ids.contains(src_region) {
+                            return Err(Error::Verification(format!("U30X unknown src region")));
+                        }
+                        for r in &[dst_offset, src_offset, size] {
+                            if !defined.contains(r) {
+                                return Err(Error::Verification(format!("U30X undefined value in memcopy")));
+                            }
+                        }
+                    }
+                    U30Op::MemFill { region, offset, value, size } => {
+                        if !region_ids.contains(region) {
+                            return Err(Error::Verification(format!("U30X unknown region")));
+                        }
+                        for r in &[offset, value, size] {
+                            if !defined.contains(r) {
+                                return Err(Error::Verification(format!("U30X undefined value in memfill")));
+                            }
+                        }
+                    }
+                    U30Op::MemSize { region, .. } => {
+                        if !region_ids.contains(region) {
+                            return Err(Error::Verification(format!("U30X unknown region")));
+                        }
+                    }
+                    U30Op::MemGrow { region, delta, .. } => {
+                        if !region_ids.contains(region) {
+                            return Err(Error::Verification(format!("U30X unknown region")));
+                        }
+                        if !defined.contains(delta) {
+                            return Err(Error::Verification(format!("U30X undefined delta")));
+                        }
+                    }
+                    U30Op::Call { function: _, args, results: _ } => {
+                        for r in args {
+                            if !defined.contains(r) {
+                                return Err(Error::Verification(format!("U30X undefined arg")));
+                            }
                         }
                     }
                 }
