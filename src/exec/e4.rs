@@ -17,7 +17,9 @@
 //!   (E2)  0x90 => LOAD.I64 0x91 => STORE.I64
 
 use crate::error::{Error, Result};
-use crate::types::{ExecutionResult, Provenance, Status};
+use crate::types::{ExecutionResult, Provenance};
+#[allow(unused_imports)]
+use crate::types::Status;
 use std::time::Instant;
 
 // ---------------------------------------------------------------------------
