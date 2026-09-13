@@ -147,6 +147,8 @@ pub enum U30Op {
     I2F { dst: u32, src: u32 },
     F2I { dst: u32, src: u32 },
     TruncF32U64 { dst: u32, src: u32 },
+    ReinterpretF32U32 { dst: u32, src: u32 },
+    ReinterpretU32F32 { dst: u32, src: u32 },
     LoadU8 { dst: u32, region: u32, offset: u32 },
     StoreU8 { region: u32, offset: u32, src: u32 },
     LoadU16 { dst: u32, region: u32, offset: u32 },
@@ -229,6 +231,8 @@ impl U30Module {
                     | U30Op::I2F { dst, .. }
                     | U30Op::F2I { dst, .. }
                     | U30Op::TruncF32U64 { dst, .. }
+                    | U30Op::ReinterpretF32U32 { dst, .. }
+                    | U30Op::ReinterpretU32F32 { dst, .. }
                     | U30Op::LoadU8 { dst, .. }
                     | U30Op::LoadU16 { dst, .. }
                     | U30Op::LoadU32 { dst, .. }
@@ -283,7 +287,9 @@ impl U30Module {
                     | U30Op::NotU64 { src, .. }
                     | U30Op::I2F { src, .. }
                     | U30Op::F2I { src, .. }
-                    | U30Op::TruncF32U64 { src, .. } => {
+                    | U30Op::TruncF32U64 { src, .. }
+                    | U30Op::ReinterpretF32U32 { src, .. }
+                    | U30Op::ReinterpretU32F32 { src, .. } => {
                         if !defined.contains(src) {
                             return Err(Error::Verification(format!(
                                 "U30X function {fn_index} block {block_index}: undefined source value %{src}"

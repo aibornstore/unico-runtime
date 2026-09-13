@@ -187,6 +187,14 @@ impl U30Runtime {
                 };
                 regs.insert(*dst, U30Value::U64(result));
             }
+            U30Op::ReinterpretF32U32 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_f32()?;
+                regs.insert(*dst, U30Value::U32(v.to_bits()));
+            }
+            U30Op::ReinterpretU32F32 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u32()?;
+                regs.insert(*dst, U30Value::F32(f32::from_bits(v)));
+            }
             U30Op::LoadU8 { dst, region, offset } => {
                 let offset = self.reg(regs, *offset)?.as_u64()? as usize;
                 let state = regions.get(region)
@@ -1203,5 +1211,52 @@ mod tests {
             .execute_experimental(&module, &[U30Value::F32(f32::NAN)])
             .expect("trunc nan");
         assert_eq!(out.results, vec![U30Value::U64(0)]);
+    }
+
+    #[test]
+    fn u30x_reinterpret_f32_u32() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::F32],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::ReinterpretF32U32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::F32(1.0)])
+            .expect("reinterpret f32->u32");
+        // 1.0 as f32 bits = 0x3F800000
+        assert_eq!(out.results, vec![U30Value::U32(0x3F800000)]);
+    }
+
+    #[test]
+    fn u30x_reinterpret_u32_f32() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U32],
+                results: vec![U30Type::F32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::ReinterpretU32F32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::U32(0x3F800000)])
+            .expect("reinterpret u32->f32");
+        assert_eq!(out.results, vec![U30Value::F32(1.0)]);
     }
 }
