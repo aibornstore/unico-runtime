@@ -479,6 +479,156 @@ mod tests {
     }
 
     #[test]
+    fn u30x_binary_add_wraps_u64() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(u64::MAX) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(1) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::AddWrapU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("add wrap");
+        assert_eq!(out.results, vec![U30Value::U64(0)]); // MAX + 1 = 0
+    }
+
+    #[test]
+    fn u30x_binary_add_wraps_u32() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(u32::MAX) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(1) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::AddWrapU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("add wrap u32");
+        assert_eq!(out.results, vec![U30Value::U32(0)]); // MAX + 1 = 0
+    }
+
+    #[test]
+    fn u30x_binary_sub_wraps_u32() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(5) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(7) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::SubWrapU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("sub wrap u32");
+        assert_eq!(out.results, vec![U30Value::U32(u32::MAX - 1)]); // 5 - 7 = -2 = u32::MAX - 1
+    }
+
+    #[test]
+    fn u30x_binary_mul_wraps_u32() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(u32::MAX) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(2) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::MulWrapU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("mul wrap u32");
+        assert_eq!(out.results, vec![U30Value::U32(u32::MAX - 1)]); // MAX * 2 = MAX << 1 | 1 = MAX - 1
+    }
+
+    #[test]
+    fn u30x_binary_and_u8() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U8],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U8(0xFF) },
+                        U30Op::Const { dst: 1, value: U30Value::U8(0x0F) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::AndU8, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("and");
+        assert_eq!(out.results, vec![U30Value::U8(0x0F)]);
+    }
+
+    #[test]
+    fn u30x_binary_or_u8() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U8],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U8(0xF0) },
+                        U30Op::Const { dst: 1, value: U30Value::U8(0x0F) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::OrU8, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("or");
+        assert_eq!(out.results, vec![U30Value::U8(0xFF)]);
+    }
+
+    #[test]
     fn u30x_binary_eq_works() {
         let module = U30Module {
             regions: vec![],
