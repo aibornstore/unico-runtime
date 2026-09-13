@@ -8,6 +8,7 @@
 //! - RET: return from function
 
 use crate::error::{Error, Result};
+use crate::leb128::{decode_uleb, decode_sleb};
 use crate::types::{Profile, Provenance, ExecutionResult, I64};
 
 /// E1 Instructions
@@ -223,40 +224,27 @@ impl Module {
         }
         pos += 1;
         let func_section_len = {
-            let len = uleb_len(bytes[pos]);
-            let v = read_uleb(&bytes[pos..]) as usize; pos += len; v
+            let (v, n) = decode_uleb(&bytes[pos..])?; pos += n; v as usize
         };
         
         let func_section_end = pos + func_section_len;
-        let func_count = {
-            let len = uleb_len(bytes[pos]);
-            let v = read_uleb(&bytes[pos..]) as u32; pos += len; v
-        };
+        let (func_count, n) = decode_uleb(&bytes[pos..])?; pos += n;
+        let func_count = func_count as u32;
         
         let mut functions = Vec::new();
         let mut code_offsets = Vec::new();
         
         for _ in 0..func_count {
-            let param_count = {
-                let len = uleb_len(bytes[pos]);
-                let v = read_uleb(&bytes[pos..]) as u32; pos += len; v
-            };
-            let result_count = {
-                let len = uleb_len(bytes[pos]);
-                let v = read_uleb(&bytes[pos..]) as u32; pos += len; v
-            };
-            let register_count = {
-                let len = uleb_len(bytes[pos]);
-                let v = read_uleb(&bytes[pos..]) as u32; pos += len; v
-            };
-            let code_offset = {
-                let len = uleb_len(bytes[pos]);
-                let v = read_uleb(&bytes[pos..]) as u32; pos += len; v
-            };
-            let code_size = {
-                let len = uleb_len(bytes[pos]);
-                let v = read_uleb(&bytes[pos..]) as u32; pos += len; v
-            };
+            let (param_count, n) = decode_uleb(&bytes[pos..])?; pos += n;
+            let (result_count, n) = decode_uleb(&bytes[pos..])?; pos += n;
+            let (register_count, n) = decode_uleb(&bytes[pos..])?; pos += n;
+            let (code_offset, n) = decode_uleb(&bytes[pos..])?; pos += n;
+            let (code_size, n) = decode_uleb(&bytes[pos..])?; pos += n;
+            let param_count = param_count as u32;
+            let result_count = result_count as u32;
+            let register_count = register_count as u32;
+            let code_offset = code_offset as u32;
+            let code_size = code_size as u32;
             
             code_offsets.push(code_offset);
             functions.push(Function {
@@ -274,10 +262,8 @@ impl Module {
             return Err(Error::Format("Missing CODE section".into()));
         }
         pos += 1;
-        let code_section_len = {
-            let len = uleb_len(bytes[pos]);
-            let v = read_uleb(&bytes[pos..]) as usize; pos += len; v
-        };
+        let (code_section_len, n) = decode_uleb(&bytes[pos..])?; pos += n;
+        let code_section_len = code_section_len as usize;
         
         let code_start = pos;
         let code_end = pos + code_section_len;
@@ -343,69 +329,52 @@ fn decode_instructions(bytes: &[u8], _register_count: u32) -> Result<Vec<Instruc
         match opcode {
             0x00 => instructions.push(Instruction::Trap),
             0x0b => {
-                let dst_len = uleb_len(bytes[pos]);
-                let dst = read_uleb(&bytes[pos..]) as u32; pos += dst_len;
-                let imm_len = sleb_len(&bytes[pos..]);
-                let imm = read_sleb(&bytes[pos..]) as i64; pos += imm_len;
-                instructions.push(Instruction::KImm { dst, imm });
+                let (dst, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (imm, n) = decode_sleb(&bytes[pos..])?; pos += n;
+                instructions.push(Instruction::KImm { dst: dst as u32, imm });
             }
             0x13 => {
-                let dst_len = uleb_len(bytes[pos]);
-                let dst = read_uleb(&bytes[pos..]) as u32; pos += dst_len;
-                let lhs_len = uleb_len(bytes[pos]);
-                let lhs = read_uleb(&bytes[pos..]) as u32; pos += lhs_len;
-                let rhs_len = uleb_len(bytes[pos]);
-                let rhs = read_uleb(&bytes[pos..]) as u32; pos += rhs_len;
-                instructions.push(Instruction::Add { dst, lhs, rhs });
+                let (dst, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (lhs, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (rhs, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                instructions.push(Instruction::Add { dst: dst as u32, lhs: lhs as u32, rhs: rhs as u32 });
             }
             0x8c => {
-                let pred_len = uleb_len(bytes[pos]);
-                let pred = read_uleb(&bytes[pos..]) as u32; pos += pred_len;
-                let dst_len = uleb_len(bytes[pos]);
-                let dst = read_uleb(&bytes[pos..]) as u32; pos += dst_len;
-                let lhs_len = uleb_len(bytes[pos]);
-                let lhs = read_uleb(&bytes[pos..]) as u32; pos += lhs_len;
-                let rhs_len = uleb_len(bytes[pos]);
-                let rhs = read_uleb(&bytes[pos..]) as u32; pos += rhs_len;
-                instructions.push(Instruction::Cmp { pred, dst, lhs, rhs });
+                let (pred, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (dst, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (lhs, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (rhs, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                instructions.push(Instruction::Cmp { pred: pred as u32, dst: dst as u32, lhs: lhs as u32, rhs: rhs as u32 });
             }
             0x8d => {
-                let target_len = uleb_len(bytes[pos]);
-                let target = read_uleb(&bytes[pos..]) as u32; pos += target_len;
-                instructions.push(Instruction::Br { target });
+                let (target, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                instructions.push(Instruction::Br { target: target as u32 });
             }
             0x8e => {
-                let cond_len = uleb_len(bytes[pos]);
-                let cond = read_uleb(&bytes[pos..]) as u32; pos += cond_len;
-                let target_len = uleb_len(bytes[pos]);
-                let target = read_uleb(&bytes[pos..]) as u32; pos += target_len;
-                instructions.push(Instruction::BrIf { cond, target });
+                let (cond, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (target, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                instructions.push(Instruction::BrIf { cond: cond as u32, target: target as u32 });
             }
             0x8f => {
-                let callee_len = uleb_len(bytes[pos]);
-                let callee = read_uleb(&bytes[pos..]) as u32; pos += callee_len;
-                let argc_len = uleb_len(bytes[pos]);
-                let argc = read_uleb(&bytes[pos..]) as u32; pos += argc_len;
+                let (callee, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (argc, n) = decode_uleb(&bytes[pos..])?; pos += n;
                 let mut args = Vec::with_capacity(argc as usize);
-                for _ in 0..argc {
-                    let arg_len = uleb_len(bytes[pos]);
-                    let arg = read_uleb(&bytes[pos..]) as u32; pos += arg_len;
-                    args.push(arg);
+                for _ in 0..argc as usize {
+                    let (arg, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                    args.push(arg as u32);
                 }
                 // result_count (ULEB, must be 1) — read and advance
-                let _ = read_uleb(&bytes[pos..]); pos += uleb_len(bytes[pos]);
+                let (_, n) = decode_uleb(&bytes[pos..])?; pos += n;
                 // result register (ULEB)
-                let result_len = uleb_len(bytes[pos]);
-                let result_reg = read_uleb(&bytes[pos..]) as u32; pos += result_len;
-                instructions.push(Instruction::Call { callee, argc, args, result_reg });
+                let (result_reg, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                instructions.push(Instruction::Call { callee: callee as u32, argc: argc as u32, args, result_reg: result_reg as u32 });
             }
             0xa6 => {
                 // result_count (ULEB, must be 1) — read and advance
-                let _ = read_uleb(&bytes[pos..]); pos += uleb_len(bytes[pos]);
+                let (_, n) = decode_uleb(&bytes[pos..])?; pos += n;
                 // result register (ULEB)
-                let result_len = uleb_len(bytes[pos]);
-                let result = read_uleb(&bytes[pos..]) as u32; pos += result_len;
-                instructions.push(Instruction::Ret { result });
+                let (result, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                instructions.push(Instruction::Ret { result: result as u32 });
             }
             _ => return Err(Error::Format(format!("Unknown E1 opcode: 0x{:02x}", opcode))),
         }
@@ -414,63 +383,14 @@ fn decode_instructions(bytes: &[u8], _register_count: u32) -> Result<Vec<Instruc
     Ok(instructions)
 }
 
-fn read_uleb(bytes: &[u8]) -> u64 {
-    let mut result = 0u64;
-    let mut shift = 0;
-    for (i, &b) in bytes.iter().enumerate() {
-        if i >= 8 { break; }
-        result |= ((b & 0x7f) as u64) << shift;
-        if b & 0x80 == 0 { break; }
-        shift += 7;
-    }
-    result
-}
-
-fn read_sleb(bytes: &[u8]) -> i64 {
-    let mut result = 0i64;
-    let mut shift = 0;
-    for i in 0..8 {
-        if i >= bytes.len() { break; }
-        let b = bytes[i] as i64;
-        result |= (b & 0x7f) << shift;
-        if b & 0x80 == 0 { break; } // Bit 7 = 0 means last byte
-        shift += 7;
-    }
-    // Sign extend: check if highest received byte has sign bit set
-    if shift > 0 && (result >> (shift - 1)) & 1 != 0 {
-        result |= -(1i64 << shift);
-    }
-    result
-}
-
-fn uleb_len(first: u8) -> usize {
-    let mut len = 1;
-    let mut b = first;
-    while b & 0x80 != 0 && len < 10 {
-        len += 1;
-        b >>= 7;
-    }
-    len
-}
-
-fn sleb_len(bytes: &[u8]) -> usize {
-    // Count SLEB128 total bytes: count bytes where bit 7 = 1, then add 1 for final byte.
-    let mut len = 0;
-    for &byte in bytes.iter() {
-        if byte & 0x80 == 0 { break; }
-        len += 1;
-        if len >= 10 { break; }
-    }
-    len + 1 // Add 1 for the final byte (bit 7 = 0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::Status;
     
     fn uleb(v: usize) -> u8 {
-        if v < 128 { v as u8 } else { (v & 0x7f) as u8 | 0x80 }
+        // Proper ULEB128 single-byte: for v < 128, just return v as-is (no continuation bit).
+        v as u8
     }
     
     fn build_e1(functions: Vec<(Vec<u8>, u32, u32)>) -> Vec<u8> {
@@ -604,19 +524,20 @@ mod tests {
         // f0: K r0=5, CALL f1(r0) → r1, RET r1
         // f1: K r0=99, RET r0
         // Expected: f0 returns 99
-        // f0: K.I64: 3, CALL: 6, RET: 3 = 12 bytes
-        // f1: K.I64: 3, RET: 3 = 6 bytes
+        // SLEB128 for 99: 0x63 0x01 (two bytes, since 99 >= 64)
         let f0 = vec![
-            0x0b, 0x00, 0x05,       // K.I64 r0=5                [0,1,2]
+            0x0b, 0x00, 0x05,       // K.I64 r0=5                  [0,1,2]
             // CALL: opcode(1)+callee(1)+argc(1)+arg(1)+result_count(1)+result(1) = 6
             0x8f, 0x01, 0x01, 0x00, 0x01, 0x01, // [3-8]
-            0xa6, 0x01, 0x01,       // RET r1                          [9,10,11]
+            0xa6, 0x01, 0x01,       // RET r1                             [9,10,11]
         ];
         let f1 = vec![
-            0x0b, 0x00, 0x63,       // K.I64 r0=99                 [0,1,2]
-            0xa6, 0x01, 0x00,       // RET r0                         [3,4,5]
+            // K.I64 r0=99: dst=0(ULEB), imm=99(SLEB128: 0xe3 0x00)
+            0x0b, 0x00, 0xe3, 0x00, // K.I64 r0=99   [0,1,2,3] = 4 bytes
+            0xa6, 0x01, 0x00,       // RET r0          [4,5,6] = 3 bytes
         ];
-        let module_bytes = build_e1(vec![(f0, 0, 2), (f1, 1, 1)]);
+        // f1: 4+3=7 bytes of code, register_count=2 to match RET writing to r0
+        let module_bytes = build_e1(vec![(f0, 0, 2), (f1, 1, 2)]);
         let module = Module::parse(&module_bytes).unwrap();
         module.verify().unwrap();
         

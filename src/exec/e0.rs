@@ -5,6 +5,7 @@
 //! Grammar: (K.I64 | ADD.I64)* (RET | TRAP)
 
 use crate::error::{Error, Result};
+use crate::leb128::{decode_uleb, decode_sleb};
 use crate::types::{Profile, Provenance, ExecutionResult};
 
 /// E0 Opcodes
@@ -61,42 +62,28 @@ impl Module {
         }
         pos += 1;
         let func_len = {
-            let len = func_len_len(&bytes[pos]);
-            let v = read_uleb(&bytes[pos..]) as usize; pos += len; v
+            let (v, n) = decode_uleb(&bytes[pos..])?; pos += n; v as usize
         };
         let _ = func_len; // silence unused warning
         
         // Function: param_count, result_count, register_count, code_offset, code_size
-        let param_count = {
-            let len = uleb_len(bytes[pos]);
-            let v = read_uleb(&bytes[pos..]) as u32; pos += len; v
-        };
-        let result_count = {
-            let len = uleb_len(bytes[pos]);
-            let v = read_uleb(&bytes[pos..]) as u32; pos += len; v
-        };
-        let register_count = {
-            let len = uleb_len(bytes[pos]);
-            let v = read_uleb(&bytes[pos..]) as u32; pos += len; v
-        };
-        let code_offset = {
-            let len = uleb_len(bytes[pos]);
-            let v = read_uleb(&bytes[pos..]) as u32; pos += len; v
-        };
-        let code_size = {
-            let len = uleb_len(bytes[pos]);
-            let v = read_uleb(&bytes[pos..]) as u32; pos += len; v
-        };
+        let (param_count, n) = decode_uleb(&bytes[pos..])?; pos += n;
+        let (result_count, n) = decode_uleb(&bytes[pos..])?; pos += n;
+        let (register_count, n) = decode_uleb(&bytes[pos..])?; pos += n;
+        let (code_offset, n) = decode_uleb(&bytes[pos..])?; pos += n;
+        let (code_size, n) = decode_uleb(&bytes[pos..])?; pos += n;
+        let param_count = param_count as u32;
+        let result_count = result_count as u32;
+        let register_count = register_count as u32;
+        let code_offset = code_offset as u32;
+        let code_size = code_size as u32;
         
         // Parse CODE section
         if pos >= bytes.len() || bytes[pos] != 0x03 {
             return Err(Error::Format("Missing CODE section".into()));
         }
         pos += 1;
-        let code_len = {
-            let len = code_len_len(&bytes[pos]);
-            let v = read_uleb(&bytes[pos..]) as usize; pos += len; v
-        };
+        let (code_len, n) = decode_uleb(&bytes[pos..])?; pos += n;
         
         // Decode instructions
         let code_start = pos;
@@ -235,37 +222,6 @@ impl Default for E0Executor {
     }
 }
 
-// LEB128 helpers
-fn read_uleb(bytes: &[u8]) -> u64 {
-    let mut result = 0u64;
-    let mut shift = 0;
-    for (i, &b) in bytes.iter().enumerate() {
-        if i >= 8 { break; }
-        result |= ((b & 0x7f) as u64) << shift;
-        if b & 0x80 == 0 { break; }
-        shift += 7;
-    }
-    result
-}
-
-fn uleb_len(first: u8) -> usize {
-    let mut len = 1;
-    let mut b = first;
-    while b & 0x80 != 0 && len < 10 {
-        len += 1;
-        b >>= 7;
-    }
-    len
-}
-
-fn func_len_len(first_byte: &u8) -> usize {
-    uleb_len(*first_byte)
-}
-
-fn code_len_len(first_byte: &u8) -> usize {
-    uleb_len(*first_byte)
-}
-
 fn decode_instructions(bytes: &[u8], _register_count: u32) -> Result<Vec<Instruction>> {
     let mut instructions = Vec::new();
     let mut pos = 0;
@@ -278,63 +234,31 @@ fn decode_instructions(bytes: &[u8], _register_count: u32) -> Result<Vec<Instruc
             0x00 => instructions.push(Instruction::Trap),
             0x0b => {
                 // K.I64 dst imm
-                let dst_len = uleb_len(bytes[pos]);
-                let dst = read_uleb(&bytes[pos..]) as u32; pos += dst_len;
-                let imm_len = sleb_len(&bytes[pos..]);
-                let imm = read_sleb(&bytes[pos..]) as i64; pos += imm_len;
-                instructions.push(Instruction::KImm { dst, imm });
+                let (dst, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (imm, n) = decode_sleb(&bytes[pos..])?; pos += n;
+                instructions.push(Instruction::KImm { dst: dst as u32, imm });
             }
             0x13 => {
                 // ADD.I64 dst lhs rhs
-                let dst_len = uleb_len(bytes[pos]);
-                let dst = read_uleb(&bytes[pos..]) as u32; pos += dst_len;
-                let lhs_len = uleb_len(bytes[pos]);
-                let lhs = read_uleb(&bytes[pos..]) as u32; pos += lhs_len;
-                let rhs_len = uleb_len(bytes[pos]);
-                let rhs = read_uleb(&bytes[pos..]) as u32; pos += rhs_len;
-                instructions.push(Instruction::Add { dst, lhs, rhs });
+                let (dst, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (lhs, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (rhs, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                instructions.push(Instruction::Add { dst: dst as u32, lhs: lhs as u32, rhs: rhs as u32 });
             }
             0xa6 => {
                 // RET count result (count=1)
-                let count_len = uleb_len(bytes[pos]);
-                let count = read_uleb(&bytes[pos..]) as u32; pos += count_len;
-                let result_len = uleb_len(bytes[pos]);
-                let result = read_uleb(&bytes[pos..]) as u32; pos += result_len;
+                let (count, n) = decode_uleb(&bytes[pos..])?; pos += n;
+                let (result, n) = decode_uleb(&bytes[pos..])?; pos += n;
                 if count != 1 {
                     return Err(Error::Verification("RET count != 1".into()));
                 }
-                instructions.push(Instruction::Ret { result });
+                instructions.push(Instruction::Ret { result: result as u32 });
             }
             _ => return Err(Error::Format(format!("Unknown opcode: 0x{:02x}", opcode))),
         }
     }
     
     Ok(instructions)
-}
-
-fn read_sleb(bytes: &[u8]) -> i64 {
-    let mut result = 0i64;
-    let mut shift = 0;
-    let mut b;
-    for i in 0..8 {
-        b = bytes[i] as i64;
-        result |= (b & 0x7f) << shift;
-        if b & 0x40 == 0 { break; }
-        shift += 7;
-    }
-    result
-}
-
-fn sleb_len(bytes: &[u8]) -> usize {
-    let mut len = 0;
-    let mut b;
-    for &byte in bytes.iter() {
-        len += 1;
-        b = byte as i64;
-        if b & 0x40 == 0 { break; }
-        if len >= 10 { break; }
-    }
-    len
 }
 
 #[cfg(test)]

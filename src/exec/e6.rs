@@ -15,7 +15,8 @@
 //!   0xFC => QZERO  0xFD => QMEMZERO
 
 use crate::error::Result;
-use crate::leb128::{decode_sleb, encode_sleb, encode_uleb};
+use crate::leb128::{encode_sleb, encode_uleb};
+#[allow(unused_imports)]
 use crate::types::{ExecutionResult, Provenance, Status};
 use std::time::Instant;
 
@@ -392,31 +393,14 @@ impl Default for QReg {
     }
 }
 
-/// Q8.8 constants
-const Q_SCALE: i32 = 256; // 2^8
+/// Q8.8 limits
 const Q_MIN: i16 = i16::MIN; // -32768
 const Q_MAX: i16 = i16::MAX; // 32767
 
 impl QReg {
-    /// Create from raw i16 (Q8.8 representation)
-    fn from_raw(v: i16) -> Self {
-        QReg(v)
-    }
-
     /// Get raw i16 value
     fn raw(&self) -> i16 {
         self.0
-    }
-
-    /// Convert Q8.8 to f32
-    fn to_f32(&self) -> f32 {
-        self.0 as f32 / Q_SCALE as f32
-    }
-
-    /// Create Q8.8 from f32 (converts to nearest)
-    fn from_f32(v: f32) -> Self {
-        let raw = (v * Q_SCALE as f32).round() as i16;
-        QReg(raw)
     }
 
     /// Integer square root for Q8.8: isqrt(|value|) scaled back to Q8.8
@@ -426,7 +410,7 @@ impl QReg {
         }
         // Convert to Q16.16 equivalent: val << 8, then isqrt
         let v = (val as i32) << 8;
-        let mut x = v;
+        let x = v;
         if x <= 0 {
             return 0;
         }

@@ -14,6 +14,7 @@
 
 use crate::error::Result;
 use crate::leb128::encode_uleb;
+#[allow(unused_imports)]
 use crate::types::{ExecutionResult, Provenance, Status};
 use std::time::Instant;
 
@@ -407,15 +408,6 @@ pub struct VReg(pub [f32; 4]);
 impl Default for VReg {
     fn default() -> Self {
         VReg([0.0; 4])
-    }
-}
-
-impl VReg {
-    fn set_lane(&mut self, lane: usize, val: f32) {
-        self.0[lane] = val;
-    }
-    fn get_lane(&self, lane: usize) -> f32 {
-        self.0[lane]
     }
 }
 

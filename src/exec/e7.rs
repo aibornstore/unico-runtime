@@ -11,9 +11,10 @@
 //!   0xFF => RET
 
 use crate::error::{Error, Result};
+use crate::exec::crypto_slot::CryptoSlot;
 use crate::leb128::encode_uleb;
-use crate::types::{ExecutionResult, Provenance, Status, I64};
-use std::time::Instant;
+use crate::types::{ExecutionResult, Provenance, Status};
+use rand::Rng;
 
 // ---------------------------------------------------------------------------
 // E7 Constants
@@ -77,31 +78,8 @@ impl E7Module {
     pub fn new(functions: Vec<E7FunctionDef>) -> Self { E7Module { functions } }
 }
 
-/// Crypto slot contract for E7 hardware crypto operations.
-/// Each slot can hold pre-expanded keys for different algorithms.
-#[derive(Debug, Clone)]
-pub enum CryptoSlot {
-    /// Empty slot - no key material loaded
-    Empty,
-    /// AES-128: 11 round keys (16 bytes each = 176 bytes)
-    Aes128 { round_keys: [u8; 176] },
-    /// AES-256: 15 round keys (16 bytes each = 240 bytes)
-    Aes256 { round_keys: [u8; 240] },
-    /// ChaCha20: 32-byte key (nonce comes from message register at execution time)
-    ChaCha20 { key: [u8; 32] },
-    /// Poly1305: 32-byte key (r[16] || s[16])
-    Poly1305 { key: [u8; 32] },
-}
-
-impl Default for CryptoSlot {
-    fn default() -> Self { CryptoSlot::Empty }
-}
-
-impl CryptoSlot {
-    pub fn is_empty(&self) -> bool {
-        matches!(self, CryptoSlot::Empty)
-    }
-}
+// CryptoSlot is defined in src/exec/crypto_slot.rs — see that module for the contract.
+// CryptoSlot::Empty / Aes128 / Aes256 / ChaCha20 / Poly1305
 
 #[derive(Debug, Clone)]
 pub struct VRegs {
@@ -139,12 +117,11 @@ pub struct E7Executor {
     memory: Vec<u8>,
     vregs: VRegs,
     fuel: usize,
-    start: Instant,
 }
 
 impl E7Executor {
     pub fn new() -> Self {
-        E7Executor { frames: vec![E7Frame::default()], memory: vec![0u8; E7_MEMORY_SIZE], vregs: VRegs::default(), fuel: 1_000_000, start: Instant::now() }
+        E7Executor { frames: vec![E7Frame::default()], memory: vec![0u8; E7_MEMORY_SIZE], vregs: VRegs::default(), fuel: 1_000_000 }
     }
     pub fn with_module(module: &E7Module) -> Self {
         let mut exec = E7Executor::new();
@@ -571,169 +548,159 @@ pub fn chacha20_poly1305_decrypt(key: &[u8; 32], nonce: &[u8; 12], ciphertext_an
 }
 
 // ---------------------------------------------------------------------------
-// BLAKE2s-256
+// BLAKE2s-256 (RFC 7693 reference implementation)
 // ---------------------------------------------------------------------------
 
-fn blake2s_sigma(a: usize) -> [usize; 10] {
-    match a {
-        0 => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-        1 => [14, 10, 4, 8, 9, 15, 13, 6, 1, 12],
-        _ => [11, 12, 0, 1, 2, 3, 4, 5, 6, 7],
+// SIGMA table from RFC 7693 Appendix D.2
+const BLAKE2S_SIGMA: [[usize; 16]; 10] = [
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+    [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4],
+    [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
+    [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13],
+    [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
+    [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11],
+    [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
+    [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5],
+    [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0],
+];
+
+// RFC 7693 BLAKE2s IV (same as SHA-256 IV)
+const BLAKE2S_IV: [u32; 8] = [
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+];
+
+fn blake2s_compress(h: &mut [u32; 8], block: &[u32; 16], t0: u32, t1: u32, f0: u32, f1: u32) {
+    let mut v = [0u32; 16];
+    // v[0..7] = h[0..7]
+    v[0] = h[0]; v[1] = h[1]; v[2] = h[2]; v[3] = h[3];
+    v[4] = h[4]; v[5] = h[5]; v[6] = h[6]; v[7] = h[7];
+    // v[8..15] = IV[0..7]
+    v[8]  = BLAKE2S_IV[0]; v[9]  = BLAKE2S_IV[1];
+    v[10] = BLAKE2S_IV[2]; v[11] = BLAKE2S_IV[3];
+    v[12] = BLAKE2S_IV[4] ^ t0;
+    v[13] = BLAKE2S_IV[5] ^ t1;
+    v[14] = BLAKE2S_IV[6] ^ f0;
+    v[15] = BLAKE2S_IV[7] ^ f1;
+
+    for r in 0..10 {
+        let s = &BLAKE2S_SIGMA[r];
+        // G macro: a=a+b+x; d=ror32(d^a,16); c=c+d; b=ror32(b^c,12); a=a+b+y; d=ror32(d^a,8); c=c+d; b=ror32(b^c,7);
+        // Column 0: G(0,4,8,12, m[s[0]], m[s[1]])
+        v[0]  = v[0].wrapping_add(v[4]).wrapping_add(block[s[0]]);
+        v[12] = v[12] ^ v[0]; v[12] = v[12].rotate_right(16);
+        v[8]  = v[8].wrapping_add(v[12]);
+        v[4]  = v[4] ^ v[8]; v[4] = v[4].rotate_right(12);
+        v[0]  = v[0].wrapping_add(v[4]).wrapping_add(block[s[1]]);
+        v[12] = v[12] ^ v[0]; v[12] = v[12].rotate_right(8);
+        v[8]  = v[8].wrapping_add(v[12]);
+        v[4]  = v[4] ^ v[8]; v[4] = v[4].rotate_right(7);
+        // Column 1: G(1,5,9,13, m[s[2]], m[s[3]])
+        v[1]  = v[1].wrapping_add(v[5]).wrapping_add(block[s[2]]);
+        v[13] = v[13] ^ v[1]; v[13] = v[13].rotate_right(16);
+        v[9]  = v[9].wrapping_add(v[13]);
+        v[5]  = v[5] ^ v[9]; v[5] = v[5].rotate_right(12);
+        v[1]  = v[1].wrapping_add(v[5]).wrapping_add(block[s[3]]);
+        v[13] = v[13] ^ v[1]; v[13] = v[13].rotate_right(8);
+        v[9]  = v[9].wrapping_add(v[13]);
+        v[5]  = v[5] ^ v[9]; v[5] = v[5].rotate_right(7);
+        // Column 2: G(2,6,10,14, m[s[4]], m[s[5]])
+        v[2]  = v[2].wrapping_add(v[6]).wrapping_add(block[s[4]]);
+        v[14] = v[14] ^ v[2]; v[14] = v[14].rotate_right(16);
+        v[10] = v[10].wrapping_add(v[14]);
+        v[6]  = v[6] ^ v[10]; v[6] = v[6].rotate_right(12);
+        v[2]  = v[2].wrapping_add(v[6]).wrapping_add(block[s[5]]);
+        v[14] = v[14] ^ v[2]; v[14] = v[14].rotate_right(8);
+        v[10] = v[10].wrapping_add(v[14]);
+        v[6]  = v[6] ^ v[10]; v[6] = v[6].rotate_right(7);
+        // Column 3: G(3,7,11,15, m[s[6]], m[s[7]])
+        v[3]  = v[3].wrapping_add(v[7]).wrapping_add(block[s[6]]);
+        v[15] = v[15] ^ v[3]; v[15] = v[15].rotate_right(16);
+        v[11] = v[11].wrapping_add(v[15]);
+        v[7]  = v[7] ^ v[11]; v[7] = v[7].rotate_right(12);
+        v[3]  = v[3].wrapping_add(v[7]).wrapping_add(block[s[7]]);
+        v[15] = v[15] ^ v[3]; v[15] = v[15].rotate_right(8);
+        v[11] = v[11].wrapping_add(v[15]);
+        v[7]  = v[7] ^ v[11]; v[7] = v[7].rotate_right(7);
+        // Row 0: G(0,5,10,15, m[s[8]], m[s[9]])
+        v[0]  = v[0].wrapping_add(v[5]).wrapping_add(block[s[8]]);
+        v[15] = v[15] ^ v[0]; v[15] = v[15].rotate_right(16);
+        v[10] = v[10].wrapping_add(v[15]);
+        v[5]  = v[5] ^ v[10]; v[5] = v[5].rotate_right(12);
+        v[0]  = v[0].wrapping_add(v[5]).wrapping_add(block[s[9]]);
+        v[15] = v[15] ^ v[0]; v[15] = v[15].rotate_right(8);
+        v[10] = v[10].wrapping_add(v[15]);
+        v[5]  = v[5] ^ v[10]; v[5] = v[5].rotate_right(7);
+        // Row 1: G(1,6,11,12, m[s[10]], m[s[11]])
+        v[1]  = v[1].wrapping_add(v[6]).wrapping_add(block[s[10]]);
+        v[12] = v[12] ^ v[1]; v[12] = v[12].rotate_right(16);
+        v[11] = v[11].wrapping_add(v[12]);
+        v[6]  = v[6] ^ v[11]; v[6] = v[6].rotate_right(12);
+        v[1]  = v[1].wrapping_add(v[6]).wrapping_add(block[s[11]]);
+        v[12] = v[12] ^ v[1]; v[12] = v[12].rotate_right(8);
+        v[11] = v[11].wrapping_add(v[12]);
+        v[6]  = v[6] ^ v[11]; v[6] = v[6].rotate_right(7);
+        // Row 2: G(2,7,8,13, m[s[12]], m[s[13]])
+        v[2]  = v[2].wrapping_add(v[7]).wrapping_add(block[s[12]]);
+        v[13] = v[13] ^ v[2]; v[13] = v[13].rotate_right(16);
+        v[8]  = v[8].wrapping_add(v[13]);
+        v[7]  = v[7] ^ v[8]; v[7] = v[7].rotate_right(12);
+        v[2]  = v[2].wrapping_add(v[7]).wrapping_add(block[s[13]]);
+        v[13] = v[13] ^ v[2]; v[13] = v[13].rotate_right(8);
+        v[8]  = v[8].wrapping_add(v[13]);
+        v[7]  = v[7] ^ v[8]; v[7] = v[7].rotate_right(7);
+        // Row 3: G(3,4,9,14, m[s[14]], m[s[15]])
+        v[3]  = v[3].wrapping_add(v[4]).wrapping_add(block[s[14]]);
+        v[14] = v[14] ^ v[3]; v[14] = v[14].rotate_right(16);
+        v[9]  = v[9].wrapping_add(v[14]);
+        v[4]  = v[4] ^ v[9]; v[4] = v[4].rotate_right(12);
+        v[3]  = v[3].wrapping_add(v[4]).wrapping_add(block[s[15]]);
+        v[14] = v[14] ^ v[3]; v[14] = v[14].rotate_right(8);
+        v[9]  = v[9].wrapping_add(v[14]);
+        v[4]  = v[4] ^ v[9]; v[4] = v[4].rotate_right(7);
     }
-}
 
-fn blake2s_compress(v: &mut [u32; 16], block: &[u32; 16], s: &[usize; 10]) {
-    // Read ALL values from v first to avoid borrow conflicts
-    let mut w = [0u32; 16];
-    for i in 0..16 { w[i] = v[i]; }
-
-    // Diagonal rounds (column-wise)
-    // G(a,b,c,d,x,y): a+=b+x; d^=a; d=rot16; c+=d+y; b^=c; b=rot12; a+=b+y; d^=a; d=rot8; c+=d; b^=c; b=rot7;
-    // Column 0: indices 0,5,10,15
-    w[0]  = w[0].wrapping_add(w[5]).wrapping_add(block[s[0]]);
-    w[15] = (w[15] ^ w[0]).rotate_right(16);
-    w[10] = w[10].wrapping_add(w[15]).wrapping_add(block[s[1]]);
-    w[5]  = (w[5] ^ w[10]).rotate_right(12);
-    w[0]  = w[0].wrapping_add(w[5]).wrapping_add(block[s[1]]);
-    w[15] = (w[15] ^ w[0]).rotate_right(8);
-    w[10] = w[10].wrapping_add(w[15]);
-    w[5]  = (w[5] ^ w[10]).rotate_right(7);
-    // Column 1: indices 1,6,11,12
-    w[1]  = w[1].wrapping_add(w[6]).wrapping_add(block[s[2]]);
-    w[12] = (w[12] ^ w[1]).rotate_right(16);
-    w[11] = w[11].wrapping_add(w[12]).wrapping_add(block[s[3]]);
-    w[6]  = (w[6] ^ w[11]).rotate_right(12);
-    w[1]  = w[1].wrapping_add(w[6]).wrapping_add(block[s[3]]);
-    w[12] = (w[12] ^ w[1]).rotate_right(8);
-    w[11] = w[11].wrapping_add(w[12]);
-    w[6]  = (w[6] ^ w[11]).rotate_right(7);
-    // Column 2: indices 2,7,8,13
-    w[2]  = w[2].wrapping_add(w[7]).wrapping_add(block[s[4]]);
-    w[13] = (w[13] ^ w[2]).rotate_right(16);
-    w[8]  = w[8].wrapping_add(w[13]).wrapping_add(block[s[5]]);
-    w[7]  = (w[7] ^ w[8]).rotate_right(12);
-    w[2]  = w[2].wrapping_add(w[7]).wrapping_add(block[s[5]]);
-    w[13] = (w[13] ^ w[2]).rotate_right(8);
-    w[8]  = w[8].wrapping_add(w[13]);
-    w[7]  = (w[7] ^ w[8]).rotate_right(7);
-    // Column 3: indices 3,4,9,14
-    w[3]  = w[3].wrapping_add(w[4]).wrapping_add(block[s[6]]);
-    w[14] = (w[14] ^ w[3]).rotate_right(16);
-    w[9]  = w[9].wrapping_add(w[14]).wrapping_add(block[s[7]]);
-    w[4]  = (w[4] ^ w[9]).rotate_right(12);
-    w[3]  = w[3].wrapping_add(w[4]).wrapping_add(block[s[7]]);
-    w[14] = (w[14] ^ w[3]).rotate_right(8);
-    w[9]  = w[9].wrapping_add(w[14]);
-    w[4]  = (w[4] ^ w[9]).rotate_right(7);
-
-    // Row rounds
-    // Row 0: indices 0,4,8,12
-    w[0]  = w[0].wrapping_add(w[4]).wrapping_add(block[s[8]]);
-    w[12] = (w[12] ^ w[0]).rotate_right(16);
-    w[8]  = w[8].wrapping_add(w[12]).wrapping_add(block[s[9]]);
-    w[4]  = (w[4] ^ w[8]).rotate_right(12);
-    w[0]  = w[0].wrapping_add(w[4]).wrapping_add(block[s[9]]);
-    w[12] = (w[12] ^ w[0]).rotate_right(8);
-    w[8]  = w[8].wrapping_add(w[12]);
-    w[4]  = (w[4] ^ w[8]).rotate_right(7);
-    // Row 1: indices 1,5,9,13
-    w[1]  = w[1].wrapping_add(w[5]).wrapping_add(block[s[0]]);
-    w[13] = (w[13] ^ w[1]).rotate_right(16);
-    w[9]  = w[9].wrapping_add(w[13]).wrapping_add(block[s[1]]);
-    w[5]  = (w[5] ^ w[9]).rotate_right(12);
-    w[1]  = w[1].wrapping_add(w[5]).wrapping_add(block[s[1]]);
-    w[13] = (w[13] ^ w[1]).rotate_right(8);
-    w[9]  = w[9].wrapping_add(w[13]);
-    w[5]  = (w[5] ^ w[9]).rotate_right(7);
-    // Row 2: indices 2,6,10,14
-    w[2]  = w[2].wrapping_add(w[6]).wrapping_add(block[s[2]]);
-    w[14] = (w[14] ^ w[2]).rotate_right(16);
-    w[10] = w[10].wrapping_add(w[14]).wrapping_add(block[s[3]]);
-    w[6]  = (w[6] ^ w[10]).rotate_right(12);
-    w[2]  = w[2].wrapping_add(w[6]).wrapping_add(block[s[3]]);
-    w[14] = (w[14] ^ w[2]).rotate_right(8);
-    w[10] = w[10].wrapping_add(w[14]);
-    w[6]  = (w[6] ^ w[10]).rotate_right(7);
-    // Row 3: indices 3,7,11,15
-    w[3]  = w[3].wrapping_add(w[7]).wrapping_add(block[s[4]]);
-    w[15] = (w[15] ^ w[3]).rotate_right(16);
-    w[11] = w[11].wrapping_add(w[15]).wrapping_add(block[s[5]]);
-    w[7]  = (w[7] ^ w[11]).rotate_right(12);
-    w[3]  = w[3].wrapping_add(w[7]).wrapping_add(block[s[5]]);
-    w[15] = (w[15] ^ w[3]).rotate_right(8);
-    w[11] = w[11].wrapping_add(w[15]);
-    w[7]  = (w[7] ^ w[11]).rotate_right(7);
-
-    // Write back — read w[i] into temp first to avoid borrow overlap
-    v[0] = w[0]; v[1] = w[1]; v[2] = w[2]; v[3] = w[3];
-    v[4] = w[4]; v[5] = w[5]; v[6] = w[6]; v[7] = w[7];
-    v[8] = w[8]; v[9] = w[9]; v[10] = w[10]; v[11] = w[11];
-    v[12] = w[12]; v[13] = w[13]; v[14] = w[14]; v[15] = w[15];
+    for i in 0..8 { h[i] ^= v[i] ^ v[i + 8]; }
 }
 
 pub fn blake2s_256(data: &[u8], _key: &[u8]) -> [u8; 32] {
-    let iv: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-    ];
+    // Initialize hash state h = IV
+    let mut h = BLAKE2S_IV;
+    // XOR parameter block: 0x01010020 = fanout=1 | depth=1 | key_len=0 | digest_size=32
+    h[0] ^= 0x01010020u32;
 
-    let mut h = iv;
-    h[0] ^= 0x01010020; // key_len=0, digest_len=32
-
+    // Process full 64-byte blocks
     let mut offset = 0usize;
-    let mut t = 0u64;
+    let mut t0: u32 = 0;
+    let mut t1: u32 = 0;
 
     while offset + 64 <= data.len() {
-        t += 64;
-        let mut v = [0u32; 16];
-        v[0] = h[0]; v[1] = h[1]; v[2] = h[2]; v[3] = h[3];
-        v[4] = h[4]; v[5] = h[5]; v[6] = h[6]; v[7] = h[7];
-        v[8] = iv[0]; v[9] = iv[1]; v[10] = iv[2]; v[11] = iv[3];
-        v[12] = (t & 0xFFFFFFFF) as u32;
-        v[13] = (t >> 32) as u32;
-        v[14] = 0;
-        v[15] = 0;
+        t0 = t0.wrapping_add(64);
+        if t0 < 64 { t1 = t1.wrapping_add(1); }
 
-        let mut block = [0u32; 16];
         let block_data = &data[offset..offset + 64];
+        let mut block = [0u32; 16];
         for i in 0..16 {
             block[i] = u32::from_le_bytes([block_data[i*4], block_data[i*4+1], block_data[i*4+2], block_data[i*4+3]]);
         }
-
-        for round in 0..10 {
-            let s = blake2s_sigma(round);
-            blake2s_compress(&mut v, &block, &s);
-        }
-        for i in 0..8 { h[i] ^= v[i] ^ v[i + 8]; }
+        blake2s_compress(&mut h, &block, t0, t1, 0, 0);
         offset += 64;
     }
 
+    // Process final (partial) block
     let remaining = data.len() - offset;
-    t += remaining as u64;
-
-    let mut v = [0u32; 16];
-    v[0] = h[0]; v[1] = h[1]; v[2] = h[2]; v[3] = h[3];
-    v[4] = h[4]; v[5] = h[5]; v[6] = h[6]; v[7] = h[7];
-    v[8] = iv[0]; v[9] = iv[1]; v[10] = iv[2]; v[11] = iv[3];
-    v[12] = (t & 0xFFFFFFFF) as u32;
-    v[13] = (t >> 32) as u32;
-    v[14] = 0xFF_FF_FF_FF; // final block flag
-    v[15] = 0;
+    t0 = t0.wrapping_add(remaining as u32);
+    if t0 < remaining as u32 { t1 = t1.wrapping_add(1); }
 
     let mut block = [0u32; 16];
-    for i in 0..remaining.min(64) {
+    for i in 0..remaining {
         block[i / 4] |= (data[offset + i] as u32) << (8 * (i % 4));
     }
-    if remaining < 64 {
-        block[remaining / 4] |= 0x80 << (8 * (remaining % 4));
-    }
+    // RFC 7693: final block padded with zeros (no 0x01 byte)
+    blake2s_compress(&mut h, &block, t0, t1, 0xFFFFFFFFu32, 0);
 
-    for round in 0..10 {
-        let s = blake2s_sigma(round);
-        blake2s_compress(&mut v, &block, &s);
-    }
-    for i in 0..8 { h[i] ^= v[i] ^ v[i + 8]; }
-
+    // Output little-endian
     let mut out = [0u8; 32];
     for i in 0..8 { out[i*4..][..4].copy_from_slice(&h[i].to_le_bytes()); }
     out
@@ -1014,7 +981,7 @@ fn aes256_key_expand(key: &[u8; 32]) -> [[u8; 16]; 15] {
     round_keys
 }
 
-fn aes128_key_expand_array(key: &[u8; 16]) -> [u8; 176] {
+pub fn aes128_key_expand_array(key: &[u8; 16]) -> [u8; 176] {
     let round_keys = aes128_key_expand(key);
     let mut out = [0u8; 176];
     for (i, rk) in round_keys.iter().enumerate() {
@@ -1023,7 +990,7 @@ fn aes128_key_expand_array(key: &[u8; 16]) -> [u8; 176] {
     out
 }
 
-fn aes256_key_expand_array(key: &[u8; 32]) -> [u8; 240] {
+pub fn aes256_key_expand_array(key: &[u8; 32]) -> [u8; 240] {
     let round_keys = aes256_key_expand(key);
     let mut out = [0u8; 240];
     for (i, rk) in round_keys.iter().enumerate() {
@@ -1141,101 +1108,48 @@ impl E7Executor {
             match instr {
                 Instruction::Aes128Enc { dst, src, key_slot } => {
                     let src_data = self.load_vreg(*src);
-                    if src_data.len() < 16 { 
-                        return Err(Error::Format("AES input too short".to_string())); 
+                    if src_data.len() < 16 {
+                        return Err(Error::Format("AES input too short".to_string()));
                     }
                     let slot = &self.frames.last().unwrap().crypto_slots[*key_slot as usize];
-                    let round_keys = match slot {
-                        CryptoSlot::Aes128 { round_keys } => {
-                            // Convert flat [u8; 176] to [[u8; 16]; 11]
-                            let mut keys = [[0u8; 16]; 11];
-                            for i in 0..11 {
-                                let start = i * 16;
-                                keys[i].copy_from_slice(&round_keys[start..start + 16]);
-                            }
-                            keys
-                        }
-                        _ => return Err(Error::Format("AES128 key slot not initialized".to_string())),
-                    };
-                    let pt: [u8; 16] = src_data[..16].try_into().map_err(|_| Error::Format("AES input too short".to_string()))?;
-                    let ct = aes128_encrypt_with_round_keys(&pt, &round_keys);
+                    let ct = slot.encrypt(&src_data[..16], None).map_err(|_| Error::Format("AES128 key slot not initialized".to_string()))?;
                     self.store_vreg(*dst, &ct);
                 }
                 Instruction::Aes128Dec { dst, src, key_slot } => {
                     let src_data = self.load_vreg(*src);
-                    if src_data.len() < 16 { 
-                        return Err(Error::Format("AES input too short".to_string())); 
+                    if src_data.len() < 16 {
+                        return Err(Error::Format("AES input too short".to_string()));
                     }
                     let slot = &self.frames.last().unwrap().crypto_slots[*key_slot as usize];
-                    let round_keys = match slot {
-                        CryptoSlot::Aes128 { round_keys } => {
-                            let mut keys = [[0u8; 16]; 11];
-                            for i in 0..11 {
-                                let start = i * 16;
-                                keys[i].copy_from_slice(&round_keys[start..start + 16]);
-                            }
-                            keys
-                        }
-                        _ => return Err(Error::Format("AES128 key slot not initialized".to_string())),
-                    };
-                    let ct: [u8; 16] = src_data[..16].try_into().map_err(|_| Error::Format("AES input too short".to_string()))?;
-                    let pt = aes128_decrypt_with_round_keys(&ct, &round_keys);
+                    let pt = slot.decrypt(&src_data[..16], None).map_err(|_| Error::Format("AES128 key slot not initialized".to_string()))?;
                     self.store_vreg(*dst, &pt);
                 }
                 Instruction::Aes256Enc { dst, src, key_slot } => {
                     let src_data = self.load_vreg(*src);
-                    if src_data.len() < 16 { 
-                        return Err(Error::Format("AES input too short".to_string())); 
+                    if src_data.len() < 16 {
+                        return Err(Error::Format("AES input too short".to_string()));
                     }
                     let slot = &self.frames.last().unwrap().crypto_slots[*key_slot as usize];
-                    let round_keys = match slot {
-                        CryptoSlot::Aes256 { round_keys } => {
-                            let mut keys = [[0u8; 16]; 15];
-                            for i in 0..15 {
-                                let start = i * 16;
-                                keys[i].copy_from_slice(&round_keys[start..start + 16]);
-                            }
-                            keys
-                        }
-                        _ => return Err(Error::Format("AES256 key slot not initialized".to_string())),
-                    };
-                    let pt: [u8; 16] = src_data[..16].try_into().map_err(|_| Error::Format("AES input too short".to_string()))?;
-                    let ct = aes256_encrypt_with_round_keys(&pt, &round_keys);
+                    let ct = slot.encrypt(&src_data[..16], None).map_err(|_| Error::Format("AES256 key slot not initialized".to_string()))?;
                     self.store_vreg(*dst, &ct);
                 }
                 Instruction::Aes256Dec { dst, src, key_slot } => {
                     let src_data = self.load_vreg(*src);
-                    if src_data.len() < 16 { 
-                        return Err(Error::Format("AES input too short".to_string())); 
+                    if src_data.len() < 16 {
+                        return Err(Error::Format("AES input too short".to_string()));
                     }
                     let slot = &self.frames.last().unwrap().crypto_slots[*key_slot as usize];
-                    let round_keys = match slot {
-                        CryptoSlot::Aes256 { round_keys } => {
-                            let mut keys = [[0u8; 16]; 15];
-                            for i in 0..15 {
-                                let start = i * 16;
-                                keys[i].copy_from_slice(&round_keys[start..start + 16]);
-                            }
-                            keys
-                        }
-                        _ => return Err(Error::Format("AES256 key slot not initialized".to_string())),
-                    };
-                    let ct: [u8; 16] = src_data[..16].try_into().map_err(|_| Error::Format("AES input too short".to_string()))?;
-                    let pt = aes256_decrypt_with_round_keys(&ct, &round_keys);
+                    let pt = slot.decrypt(&src_data[..16], None).map_err(|_| Error::Format("AES256 key slot not initialized".to_string()))?;
                     self.store_vreg(*dst, &pt);
                 }
-                Instruction::ChaCha20 { dst, msg, nonce, key_slot } => {
+                Instruction::ChaCha20 { dst, msg, nonce: _, key_slot } => {
                     let msg_data = self.load_vreg(*msg);
-                    let slot = &self.frames.last().unwrap().crypto_slots[*key_slot as usize];
-                    let key_arr: [u8; 32] = match slot {
-                        CryptoSlot::ChaCha20 { key } => *key,
-                        _ => return Err(Error::Format("ChaCha20 key slot not initialized".to_string())),
-                    };
                     if msg_data.len() < 12 {
                         return Err(Error::Format("ChaCha20: need 12-byte nonce".to_string()));
                     }
                     let nonce_arr: [u8; 12] = msg_data[..12].try_into().map_err(|_| Error::Format("ChaCha20 nonce too short".to_string()))?;
-                    let ct = chacha20_ctr(&key_arr, &nonce_arr, &msg_data[12..]);
+                    let slot = &self.frames.last().unwrap().crypto_slots[*key_slot as usize];
+                    let ct = slot.encrypt(&msg_data[12..], Some(&nonce_arr)).map_err(|_| Error::Format("ChaCha20 key slot not initialized".to_string()))?;
                     self.store_vreg(*dst, &ct);
                 }
                 Instruction::StoreAes128Key { slot, src } => {
@@ -1302,7 +1216,7 @@ impl E7Executor {
                     out[..32.min(result_bytes.len())].copy_from_slice(&result_bytes[..32.min(result_bytes.len())]);
                     self.store_vreg(*dst, &out);
                 }
-                Instruction::AddMod { dst, a, b, m } => {
+                Instruction::AddMod { dst, a, b, m: _ } => {
                     let a_data = self.load_vreg(*a);
                     let b_data = self.load_vreg(*b);
                     if a_data.len() < 16 || b_data.len() < 16 { return Err(Error::Format("AddMod: need 16-byte operands".to_string())); }
@@ -1365,28 +1279,65 @@ impl E7Executor {
                 }
                 Instruction::Trap => { return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit)); }
                 Instruction::Sha256 { dst, src, count } => {
-                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                    let src_data = self.load_vreg(*src);
+                    let data_len = (*count as usize).min(src_data.len());
+                    let hash = sha256(&src_data[..data_len]);
+                    self.store_vreg(*dst, &hash);
                 }
                 Instruction::Blake2S { dst, src, count } => {
-                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                    let src_data = self.load_vreg(*src);
+                    let data_len = (*count as usize).min(src_data.len());
+                    let hash = blake2s_256(&src_data[..data_len], &[]);
+                    self.store_vreg(*dst, &hash);
                 }
                 Instruction::Hmac { dst, key, data, count } => {
-                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                    let key_data = self.load_vreg(*key);
+                    let msg_data = self.load_vreg(*data);
+                    let key_len = (*count as usize).min(key_data.len());
+                    let msg_len = msg_data.len();
+                    let hash = hmac_sha256(&key_data[..key_len], &msg_data[..msg_len]);
+                    self.store_vreg(*dst, &hash);
                 }
                 Instruction::Hkdf { dk, ikm, salt, info, count } => {
-                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                    let ikm_data = self.load_vreg(*ikm);
+                    let salt_data = self.load_vreg(*salt);
+                    let info_data = self.load_vreg(*info);
+                    let dk_len = (*count as usize).min(256);
+                    let hash = hkdf_sha256(&ikm_data, &salt_data, &info_data, dk_len);
+                    self.store_vreg(*dk, &hash);
                 }
                 Instruction::Poly1305 { dst, msg, count } => {
-                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                    let slot = &self.frames.last().unwrap().crypto_slots[*count as usize];
+                    match slot {
+                        CryptoSlot::Poly1305 { key } => {
+                            let msg_data = self.load_vreg(*msg);
+                            let mac = poly1305_mac(key, &msg_data);
+                            self.store_vreg(*dst, &mac);
+                        }
+                        _ => return Err(Error::Format("Poly1305: slot not initialized or wrong type".to_string())),
+                    }
                 }
                 Instruction::Xor { dst, a, b, count } => {
-                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                    let a_data = self.load_vreg(*a);
+                    let b_data = self.load_vreg(*b);
+                    let len = (*count as usize).min(a_data.len()).min(b_data.len());
+                    let mut out = vec![0u8; len];
+                    for i in 0..len {
+                        out[i] = a_data[i] ^ b_data[i];
+                    }
+                    self.store_vreg(*dst, &out);
                 }
                 Instruction::Rand { dst, count } => {
-                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                    let mut rng = rand::thread_rng();
+                    let len = (*count as usize).min(256);
+                    let mut rand_bytes = vec![0u8; len];
+                    rng.fill(&mut rand_bytes[..]);
+                    self.store_vreg(*dst, &rand_bytes);
                 }
                 Instruction::Cpy { dst, src, count } => {
-                    return Err(Error::Trap(crate::error::ErrorCode::E0T001Explicit));
+                    let src_data = self.load_vreg(*src);
+                    let len = (*count as usize).min(src_data.len());
+                    self.store_vreg(*dst, &src_data[..len]);
                 }
             }
         }
@@ -1699,7 +1650,7 @@ mod tests {
     #[test]
     fn test_sha256_abc() {
         let h = sha256(b"abc");
-        let expected = hex_to_bytes("ba 78 16 56 23 4f 18 6d 02 5c 4f b3 9f 81 08 92 6a 7c 89 47 4e 0c 82 32 c9 8b 1f 63 87 9a e2 4a");
+        let expected = hex_to_bytes("ba 78 16 bf 8f 01 cf ea 41 41 40 de 5d ae 22 23 b0 03 61 a3 96 17 7a 9c b4 10 ff 61 f2 00 15 ad");
         assert_eq!(&h[..], &expected[..32], "SHA-256 abc");
     }
 
@@ -1709,10 +1660,10 @@ mod tests {
 
     #[test]
     fn test_hmac_sha256_known_vector() {
-        let key = hex_to_bytes("0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b");
-        let data = hex_to_bytes("48 54 54 50");
-        let mac = hmac_sha256(&key, &data);
-        let expected = hex_to_bytes("b6 13 34 dd 80 22 1e 24 8e 77 6f 9f 26 40 18 86 01 22 9f 7c 75 4b 8d 50 7b 1d e4 e2 43 90 d8 8e");
+        let key = hex_to_bytes("0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b 0b");
+        let data = b"Hi There";
+        let mac = hmac_sha256(&key, data);
+        let expected = hex_to_bytes("b0 34 4c 61 d8 db 38 53 5c a8 af ce af 0b f1 2b 88 1d c2 00 c9 83 3d a7 26 e9 37 6c 2e 32 cf f7");
         assert_eq!(&mac[..], &expected[..32], "HMAC-SHA256 RFC 4231");
     }
 
@@ -1723,14 +1674,14 @@ mod tests {
     #[test]
     fn test_blake2s_empty() {
         let h = blake2s_256(&[], &[]);
-        let expected = hex_to_bytes("69 21 7a 30 79 90 80 5d 09 36 38 d5 42 8e 53 23 93 17 28 92 15 9d 5f 76 1e 4b d5 a6 58 40 76 83");
+        let expected = hex_to_bytes("69 21 7a 30 79 90 80 94 e1 11 21 d0 42 35 4a 7c 1f 55 b6 48 2c a1 a5 1e 1b 25 0d fd 1e d0 ee f9");
         assert_eq!(&h[..], &expected[..32], "BLAKE2s-256 empty");
     }
 
     #[test]
     fn test_blake2s_abc() {
         let h = blake2s_256(b"abc", &[]);
-        let expected = hex_to_bytes("68 32 12 7d 75 4e ed 9d 9b 5d a1 b6 6b c2 76 7c 4b 45 2e 69 12 4a 06 93 88 54 2c 8d 3c e9 d9 3d");
+        let expected = hex_to_bytes("50 8c 5e 8c 32 7c 14 e2 e1 a7 2b a3 4e eb 45 2f 37 45 8b 20 9e d6 3a 29 4d 99 9b 4c 86 67 59 82");
         assert_eq!(&h[..], &expected[..32], "BLAKE2s-256 abc");
     }
 

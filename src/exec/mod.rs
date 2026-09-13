@@ -2,6 +2,7 @@
 //! 
 //! Executors for UNICO profiles (E0, E1, E2, E3, E5, E6, E7)
 
+pub mod crypto_slot;
 pub mod e0;
 pub mod e1;
 pub mod e2;
@@ -9,6 +10,8 @@ pub mod e3;
 pub mod e5;
 pub mod e6;
 pub mod e7;
+
+pub use crypto_slot::CryptoSlot;
 
 pub use e0::{E0Executor, Module as E0Module, Function as E0Function, Instruction as E0Instruction};
 pub use e1::{E1Executor, Module as E1Module, Function as E1Function, Instruction as E1Instruction};
