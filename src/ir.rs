@@ -149,6 +149,25 @@ pub enum U30Op {
     TruncF32U64 { dst: u32, src: u32 },
     ReinterpretF32U32 { dst: u32, src: u32 },
     ReinterpretU32F32 { dst: u32, src: u32 },
+    AbsU64 { dst: u32, src: u32 },
+    AbsU32 { dst: u32, src: u32 },
+    NegU64 { dst: u32, src: u32 },
+    NegU32 { dst: u32, src: u32 },
+    CtzU64 { dst: u32, src: u32 },
+    CtzU32 { dst: u32, src: u32 },
+    ClzU64 { dst: u32, src: u32 },
+    ClzU32 { dst: u32, src: u32 },
+    PopcntU64 { dst: u32, src: u32 },
+    PopcntU32 { dst: u32, src: u32 },
+    RotlU64 { dst: u32, val: u32, sh: u32 },
+    RotlU32 { dst: u32, val: u32, sh: u32 },
+    RotrU64 { dst: u32, val: u32, sh: u32 },
+    RotrU32 { dst: u32, val: u32, sh: u32 },
+    FEq { dst: u32, a: u32, b: u32 },
+    FLt { dst: u32, a: u32, b: u32 },
+    FGt { dst: u32, a: u32, b: u32 },
+    FLe { dst: u32, a: u32, b: u32 },
+    FGe { dst: u32, a: u32, b: u32 },
     LoadU8 { dst: u32, region: u32, offset: u32 },
     StoreU8 { region: u32, offset: u32, src: u32 },
     LoadU16 { dst: u32, region: u32, offset: u32 },
@@ -233,6 +252,25 @@ impl U30Module {
                     | U30Op::TruncF32U64 { dst, .. }
                     | U30Op::ReinterpretF32U32 { dst, .. }
                     | U30Op::ReinterpretU32F32 { dst, .. }
+                    | U30Op::AbsU64 { dst, .. }
+                    | U30Op::AbsU32 { dst, .. }
+                    | U30Op::NegU64 { dst, .. }
+                    | U30Op::NegU32 { dst, .. }
+                    | U30Op::CtzU64 { dst, .. }
+                    | U30Op::CtzU32 { dst, .. }
+                    | U30Op::ClzU64 { dst, .. }
+                    | U30Op::ClzU32 { dst, .. }
+                    | U30Op::PopcntU64 { dst, .. }
+                    | U30Op::PopcntU32 { dst, .. }
+                    | U30Op::RotlU64 { dst, .. }
+                    | U30Op::RotlU32 { dst, .. }
+                    | U30Op::RotrU64 { dst, .. }
+                    | U30Op::RotrU32 { dst, .. }
+                    | U30Op::FEq { dst, .. }
+                    | U30Op::FLt { dst, .. }
+                    | U30Op::FGt { dst, .. }
+                    | U30Op::FLe { dst, .. }
+                    | U30Op::FGe { dst, .. }
                     | U30Op::LoadU8 { dst, .. }
                     | U30Op::LoadU16 { dst, .. }
                     | U30Op::LoadU32 { dst, .. }
@@ -289,10 +327,51 @@ impl U30Module {
                     | U30Op::F2I { src, .. }
                     | U30Op::TruncF32U64 { src, .. }
                     | U30Op::ReinterpretF32U32 { src, .. }
-                    | U30Op::ReinterpretU32F32 { src, .. } => {
+                    | U30Op::ReinterpretU32F32 { src, .. }
+                    | U30Op::AbsU64 { src, .. }
+                    | U30Op::AbsU32 { src, .. }
+                    | U30Op::NegU64 { src, .. }
+                    | U30Op::NegU32 { src, .. }
+                    | U30Op::CtzU64 { src, .. }
+                    | U30Op::CtzU32 { src, .. }
+                    | U30Op::ClzU64 { src, .. }
+                    | U30Op::ClzU32 { src, .. }
+                    | U30Op::PopcntU64 { src, .. }
+                    | U30Op::PopcntU32 { src, .. } => {
                         if !defined.contains(src) {
                             return Err(Error::Verification(format!(
                                 "U30X function {fn_index} block {block_index}: undefined source value %{src}"
+                            )));
+                        }
+                    }
+                    U30Op::RotlU64 { val, sh, .. }
+                    | U30Op::RotlU32 { val, sh, .. }
+                    | U30Op::RotrU64 { val, sh, .. }
+                    | U30Op::RotrU32 { val, sh, .. } => {
+                        if !defined.contains(val) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined val value %{val}"
+                            )));
+                        }
+                        if !defined.contains(sh) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined sh value %{sh}"
+                            )));
+                        }
+                    }
+                    U30Op::FEq { a, b, .. }
+                    | U30Op::FLt { a, b, .. }
+                    | U30Op::FGt { a, b, .. }
+                    | U30Op::FLe { a, b, .. }
+                    | U30Op::FGe { a, b, .. } => {
+                        if !defined.contains(a) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{a}"
+                            )));
+                        }
+                        if !defined.contains(b) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{b}"
                             )));
                         }
                     }

@@ -195,6 +195,91 @@ impl U30Runtime {
                 let v = self.reg(regs, *src)?.as_u32()?;
                 regs.insert(*dst, U30Value::F32(f32::from_bits(v)));
             }
+            U30Op::AbsU64 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u64()?;
+                regs.insert(*dst, U30Value::U64(v));
+            }
+            U30Op::AbsU32 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u32()?;
+                regs.insert(*dst, U30Value::U32(v));
+            }
+            U30Op::NegU64 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u64()?;
+                regs.insert(*dst, U30Value::U64(v.wrapping_neg()));
+            }
+            U30Op::NegU32 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u32()?;
+                regs.insert(*dst, U30Value::U32(v.wrapping_neg()));
+            }
+            U30Op::CtzU64 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u64()?;
+                regs.insert(*dst, U30Value::U64(v.trailing_zeros() as u64));
+            }
+            U30Op::CtzU32 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u32()?;
+                regs.insert(*dst, U30Value::U64(v.trailing_zeros() as u64));
+            }
+            U30Op::ClzU64 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u64()?;
+                regs.insert(*dst, U30Value::U64(v.leading_zeros() as u64));
+            }
+            U30Op::ClzU32 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u32()?;
+                regs.insert(*dst, U30Value::U64(v.leading_zeros() as u64));
+            }
+            U30Op::PopcntU64 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u64()?;
+                regs.insert(*dst, U30Value::U64(v.count_ones() as u64));
+            }
+            U30Op::PopcntU32 { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u32()?;
+                regs.insert(*dst, U30Value::U64(v.count_ones() as u64));
+            }
+            U30Op::RotlU64 { dst, val, sh } => {
+                let v = self.reg(regs, *val)?.as_u64()?;
+                let s = self.reg(regs, *sh)?.as_u64()? as u32;
+                regs.insert(*dst, U30Value::U64(v.rotate_left(s)));
+            }
+            U30Op::RotlU32 { dst, val, sh } => {
+                let v = self.reg(regs, *val)?.as_u32()?;
+                let s = self.reg(regs, *sh)?.as_u32()? as u32;
+                regs.insert(*dst, U30Value::U32(v.rotate_left(s)));
+            }
+            U30Op::RotrU64 { dst, val, sh } => {
+                let v = self.reg(regs, *val)?.as_u64()?;
+                let s = self.reg(regs, *sh)?.as_u64()? as u32;
+                regs.insert(*dst, U30Value::U64(v.rotate_right(s)));
+            }
+            U30Op::RotrU32 { dst, val, sh } => {
+                let v = self.reg(regs, *val)?.as_u32()?;
+                let s = self.reg(regs, *sh)?.as_u32()? as u32;
+                regs.insert(*dst, U30Value::U32(v.rotate_right(s)));
+            }
+            U30Op::FEq { dst, a, b } => {
+                let av = self.reg(regs, *a)?.as_f32()?;
+                let bv = self.reg(regs, *b)?.as_f32()?;
+                regs.insert(*dst, U30Value::Bool(av == bv));
+            }
+            U30Op::FLt { dst, a, b } => {
+                let av = self.reg(regs, *a)?.as_f32()?;
+                let bv = self.reg(regs, *b)?.as_f32()?;
+                regs.insert(*dst, U30Value::Bool(av < bv));
+            }
+            U30Op::FGt { dst, a, b } => {
+                let av = self.reg(regs, *a)?.as_f32()?;
+                let bv = self.reg(regs, *b)?.as_f32()?;
+                regs.insert(*dst, U30Value::Bool(av > bv));
+            }
+            U30Op::FLe { dst, a, b } => {
+                let av = self.reg(regs, *a)?.as_f32()?;
+                let bv = self.reg(regs, *b)?.as_f32()?;
+                regs.insert(*dst, U30Value::Bool(av <= bv));
+            }
+            U30Op::FGe { dst, a, b } => {
+                let av = self.reg(regs, *a)?.as_f32()?;
+                let bv = self.reg(regs, *b)?.as_f32()?;
+                regs.insert(*dst, U30Value::Bool(av >= bv));
+            }
             U30Op::LoadU8 { dst, region, offset } => {
                 let offset = self.reg(regs, *offset)?.as_u64()? as usize;
                 let state = regions.get(region)
@@ -1258,5 +1343,157 @@ mod tests {
             .execute_experimental(&module, &[U30Value::U32(0x3F800000)])
             .expect("reinterpret u32->f32");
         assert_eq!(out.results, vec![U30Value::F32(1.0)]);
+    }
+
+    #[test]
+    fn u30x_abs_u64_works() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U64],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::AbsU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::U64(42)])
+            .expect("abs");
+        assert_eq!(out.results, vec![U30Value::U64(42)]);
+    }
+
+    #[test]
+    fn u30x_neg_u32_works() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U32],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::NegU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::U32(5)])
+            .expect("neg");
+        assert_eq!(out.results, vec![U30Value::U32(0xFFFFFFFB)]); // -5 wrapping
+    }
+
+    #[test]
+    fn u30x_ctz_clz_popcnt() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U64],
+                results: vec![U30Type::U64, U30Type::U64, U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::CtzU64 { dst: 1, src: 0 },
+                        U30Op::ClzU64 { dst: 2, src: 0 },
+                        U30Op::PopcntU64 { dst: 3, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1, 2, 3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // 0b100100 = 36: ctz=2, clz=58, popcnt=2
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::U64(0b100100)])
+            .expect("ctz/clz/popcnt");
+        assert_eq!(out.results[0], U30Value::U64(2)); // ctz
+        assert_eq!(out.results[1], U30Value::U64(58)); // clz
+        assert_eq!(out.results[2], U30Value::U64(2)); // popcnt
+    }
+
+    #[test]
+    fn u30x_rotr_works() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U64],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 1, value: U30Value::U64(1) },
+                        U30Op::RotrU64 { dst: 2, val: 0, sh: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // 0x8000000000000001 rotated right by 1 = 0xC000000000000000
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::U64(0x8000000000000001)])
+            .expect("rotr");
+        assert_eq!(out.results, vec![U30Value::U64(0xC000000000000000)]);
+    }
+
+    #[test]
+    fn u30x_f32_comparisons() {
+        let make_module = || U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::F32, U30Type::F32],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+
+        // FLt: 1.0 < 2.0
+        let mut m = make_module();
+        m.functions[0].blocks[0].ops.push(U30Op::FLt { dst: 2, a: 0, b: 1 });
+        m.functions[0].blocks[0].terminator = U30Terminator::Ret { values: vec![2] };
+        let out = U30Runtime::default()
+            .execute_experimental(&m, &[U30Value::F32(1.0), U30Value::F32(2.0)])
+            .expect("flt");
+        assert_eq!(out.results[0], U30Value::Bool(true));
+
+        // FLe: 2.0 <= 2.0
+        let mut m = make_module();
+        m.functions[0].blocks[0].ops.push(U30Op::FLe { dst: 2, a: 0, b: 1 });
+        m.functions[0].blocks[0].terminator = U30Terminator::Ret { values: vec![2] };
+        let out = U30Runtime::default()
+            .execute_experimental(&m, &[U30Value::F32(2.0), U30Value::F32(2.0)])
+            .expect("fle");
+        assert_eq!(out.results[0], U30Value::Bool(true));
+
+        // FGe: 3.0 >= 2.0
+        let mut m = make_module();
+        m.functions[0].blocks[0].ops.push(U30Op::FGe { dst: 2, a: 0, b: 1 });
+        m.functions[0].blocks[0].terminator = U30Terminator::Ret { values: vec![2] };
+        let out = U30Runtime::default()
+            .execute_experimental(&m, &[U30Value::F32(3.0), U30Value::F32(2.0)])
+            .expect("fge");
+        assert_eq!(out.results[0], U30Value::Bool(true));
+
+        // FEq: 5.0 == 5.0
+        let mut m = make_module();
+        m.functions[0].blocks[0].ops.push(U30Op::FEq { dst: 2, a: 0, b: 1 });
+        m.functions[0].blocks[0].terminator = U30Terminator::Ret { values: vec![2] };
+        let out = U30Runtime::default()
+            .execute_experimental(&m, &[U30Value::F32(5.0), U30Value::F32(5.0)])
+            .expect("feq");
+        assert_eq!(out.results[0], U30Value::Bool(true));
     }
 }
