@@ -174,6 +174,10 @@ impl U30Runtime {
                 let v = self.reg(regs, *src)?.as_u64()? as f32;
                 regs.insert(*dst, U30Value::F32(v));
             }
+            U30Op::F2I { dst, src } => {
+                let v = self.reg(regs, *src)?.as_f32()?;
+                regs.insert(*dst, U30Value::U64(v as u64));
+            }
             U30Op::LoadU8 { dst, region, offset } => {
                 let offset = self.reg(regs, *offset)?.as_u64()? as usize;
                 let state = regions.get(region)
@@ -1137,5 +1141,28 @@ mod tests {
             .execute_experimental(&module, &[U30Value::U32(42)])
             .expect("i2f");
         assert_eq!(out.results, vec![U30Value::F32(42.0)]);
+    }
+
+    #[test]
+    fn u30x_f2i_works() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::F32],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::F2I { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::F32(99.9)])
+            .expect("f2i");
+        assert_eq!(out.results, vec![U30Value::U64(99)]);
     }
 }
