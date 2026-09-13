@@ -1748,4 +1748,146 @@ mod tests {
         let bi = BI5::from_le_bytes(&bytes);
         assert_eq!(bi.0[0], 0x78563412);
     }
+
+    // =====================================================================
+    // Property-based tests for LEB128 (deterministic pseudo-random inputs)
+    // =====================================================================
+
+    struct LcgRng(u64);
+    impl LcgRng {
+        fn new(seed: u64) -> Self { LcgRng(seed) }
+        fn next(&mut self) -> u64 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1);
+            self.0
+        }
+        fn next_u128(&mut self) -> u128 {
+            ((self.next() as u128) << 64) | (self.next() as u128)
+        }
+    }
+
+    #[test]
+    fn test_uleb_roundtrip_large_range() {
+        let max_uleb = (1usize << 60); // stays within 9 ULEB bytes (shift+7 ≤ 64)
+        let mut rng = LcgRng::new(0x123456789abcdef);
+        for _ in 0..1000 {
+            let v = (rng.next_u128() as usize) % max_uleb;
+            let encoded = crate::leb128::encode_uleb(v);
+            let (decoded, n2) = crate::leb128::decode_uleb(&encoded).unwrap();
+            assert_eq!(decoded, v);
+            assert_eq!(n2, encoded.len());
+        }
+        // Boundary values (all fit in ≤9 ULEB bytes)
+        for &v in &[0usize, 1, 126, 127, 128, 16383, 16384, 2_097_151, 2_097_152, max_uleb - 1] {
+            let encoded = crate::leb128::encode_uleb(v);
+            let (decoded, n2) = crate::leb128::decode_uleb(&encoded).unwrap();
+            assert_eq!(decoded, v);
+            assert_eq!(n2, encoded.len());
+        }
+    }
+
+    #[test]
+    fn test_sleb_roundtrip_range() {
+        let mut rng = LcgRng::new(0x987654321fedcba);
+        for _ in 0..1000 {
+            let v = rng.next_u128() as i64;
+            let encoded = crate::leb128::encode_sleb(v);
+            let (decoded, n2) = crate::leb128::decode_sleb(&encoded).unwrap();
+            assert_eq!(decoded, v);
+            assert_eq!(n2, encoded.len());
+        }
+        for &v in &[-128, -127, -65, -64, -63, -1, 0, 1, 63, 64, 127, 128, i64::MIN, i64::MAX] {
+            let encoded = crate::leb128::encode_sleb(v);
+            let (decoded, n2) = crate::leb128::decode_sleb(&encoded).unwrap();
+            assert_eq!(decoded, v);
+            assert_eq!(n2, encoded.len());
+        }
+    }
+
+    // =====================================================================
+    // Property-based tests for big-int modular arithmetic (T12)
+    // =====================================================================
+
+    fn mod_reduce(mut n: u128, m: u128) -> u128 {
+        let mut r = n % m;
+        while r >= m { r -= m; }
+        r
+    }
+
+    #[test]
+    fn test_addmod_property() {
+        // Verify: (a + b) mod m = result, with a,b < m (typical crypto usage).
+        // Use wrapping_add to avoid overflow panic when a+b > u128::MAX.
+        let mut rng = LcgRng::new(0x1111222233334444);
+        for _ in 0..200 {
+            let m = rng.next_u128() | 1; // non-zero odd modulus
+            let a = rng.next_u128() % m; // ensure a < m
+            let b = rng.next_u128() % m; // ensure b < m
+            let expected = a.wrapping_add(b) % m;
+            let a_bi = BI5::from_130(a, 0);
+            let b_bi = BI5::from_130(b, 0);
+            let m_bi = BI5::from_130(m, 0);
+            let sum = a_bi.add(&b_bi);
+            let (sum_lo, _) = sum.to_130();
+            let (m_lo, _) = m_bi.to_130();
+            let result = if sum_lo >= m_lo { sum_lo - m_lo } else { sum_lo };
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_mulmod_property() {
+        // Replicate the exact logic used in Instruction::MulMod
+        let mut rng = LcgRng::new(0x5555666677778888);
+        for _ in 0..200 {
+            let a = rng.next_u128();
+            let b = rng.next_u128();
+            let m = rng.next_u128() | 1;
+            let expected = a.wrapping_mul(b) % m;
+            let a_bi = BI5::from_130(a, 0);
+            let b_bi = BI5::from_130(b, 0);
+            let m_bi = BI5::from_130(m, 0);
+            let (a128, _) = a_bi.to_130();
+            let (b128, _) = b_bi.to_130();
+            let (m128, _) = m_bi.to_130();
+            let result = if m128 == 0 { 0 } else { a128.wrapping_mul(b128) % m128 };
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_modexp_property() {
+        // Replicate square-and-multiply over 130 bits (exact logic from ModExp)
+        let mut rng = LcgRng::new(0xabcdef0123456789);
+        for _ in 0..50 {
+            let base = rng.next_u128() % 4096;
+            let exp = rng.next_u128() % 4096;
+            let m = rng.next_u128() % 4096 + 1;
+            // Python-style ground truth
+            let mut expected = 1u128 % m;
+            let mut b = base % m;
+            let mut e = exp;
+            while e > 0 {
+                if e & 1 == 1 { expected = expected * b % m; }
+                e >>= 1;
+                if e > 0 { b = b * b % m; }
+            }
+            // Exact logic from Instruction::ModExp (lines ~1251-1265)
+            let base_bi = BI5::from_130(base, 0);
+            let exp_bi = BI5::from_130(exp, 0);
+            let m_bi = BI5::from_130(m, 0);
+            let (base128, _) = base_bi.to_130();
+            let (m128, _) = m_bi.to_130();
+            let mut result = 1u128;
+            let mut base_acc = base128 % m128;
+            for i in 0..130u32 {
+                let limb = (i / 64) as usize;
+                let bit = i % 64;
+                if (exp_bi.0[limb] >> bit) & 1 == 1 {
+                    result = result.wrapping_mul(base_acc) % m128;
+                }
+                base_acc = base_acc.wrapping_mul(base_acc) % m128;
+            }
+            assert_eq!(result, expected);
+        }
+    }
 }
