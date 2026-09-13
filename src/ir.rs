@@ -15,6 +15,7 @@ pub enum U30Type {
     U32,
     U64,
     F32,
+    F64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,6 +26,7 @@ pub enum U30Value {
     U32(u32),
     U64(u64),
     F32(f32),
+    F64(f64),
 }
 
 impl U30Value {
@@ -36,6 +38,7 @@ impl U30Value {
             Self::U32(_) => U30Type::U32,
             Self::U64(_) => U30Type::U64,
             Self::F32(_) => U30Type::F32,
+            Self::F64(_) => U30Type::F64,
         }
     }
 
@@ -91,6 +94,13 @@ impl U30Value {
         match self {
             Self::F32(v) => Ok(*v),
             other => Err(Error::Generic(format!("U30X type error: expected f32, got {:?}", other.value_type()))),
+        }
+    }
+
+    pub fn as_f64(&self) -> Result<f64> {
+        match self {
+            Self::F64(v) => Ok(*v),
+            other => Err(Error::Generic(format!("U30X type error: expected f64, got {:?}", other.value_type()))),
         }
     }
 }
@@ -196,6 +206,39 @@ pub enum U30Op {
     MemFill { region: u32, offset: u32, value: u32, size: u32 },
     MemSize { dst: u32, region: u32 },
     MemGrow { dst: u32, region: u32, delta: u32 },
+    // F64 arithmetic
+    F64Eq { dst: u32, a: u32, b: u32 },
+    F64Lt { dst: u32, a: u32, b: u32 },
+    F64Gt { dst: u32, a: u32, b: u32 },
+    F64Le { dst: u32, a: u32, b: u32 },
+    F64Ge { dst: u32, a: u32, b: u32 },
+    F64Add { dst: u32, a: u32, b: u32 },
+    F64Sub { dst: u32, a: u32, b: u32 },
+    F64Mul { dst: u32, a: u32, b: u32 },
+    F64Div { dst: u32, a: u32, b: u32 },
+    F64Sqrt { dst: u32, src: u32 },
+    F64Abs { dst: u32, src: u32 },
+    F64Neg { dst: u32, src: u32 },
+    F64Min { dst: u32, a: u32, b: u32 },
+    F64Max { dst: u32, a: u32, b: u32 },
+    // F64 conversions
+    I64F64 { dst: u32, src: u32 },
+    F64I64 { dst: u32, src: u32 },
+    F32F64 { dst: u32, src: u32 },
+    F64F32 { dst: u32, src: u32 },
+    ReinterpretF64U64 { dst: u32, src: u32 },
+    ReinterpretU64F64 { dst: u32, src: u32 },
+    // Sign extend (preserve sign bit)
+    SExtI8U16 { dst: u32, src: u32 },
+    SExtI8U32 { dst: u32, src: u32 },
+    SExtI8U64 { dst: u32, src: u32 },
+    SExtI16U32 { dst: u32, src: u32 },
+    SExtI16U64 { dst: u32, src: u32 },
+    SExtI32U64 { dst: u32, src: u32 },
+    // Byte swap
+    ByteSwapU16 { dst: u32, src: u32 },
+    ByteSwapU32 { dst: u32, src: u32 },
+    ByteSwapU64 { dst: u32, src: u32 },
     Call { function: u32, args: Vec<u32>, results: Vec<u32> },
     TableBr { table: u32, index: u32 },
     Break { code: u32 },
@@ -326,6 +369,35 @@ impl U30Module {
                     | U30Op::FNeg { dst, .. }
                     | U30Op::FMin { dst, .. }
                     | U30Op::FMax { dst, .. }
+                    | U30Op::F64Eq { dst, .. }
+                    | U30Op::F64Lt { dst, .. }
+                    | U30Op::F64Gt { dst, .. }
+                    | U30Op::F64Le { dst, .. }
+                    | U30Op::F64Ge { dst, .. }
+                    | U30Op::F64Add { dst, .. }
+                    | U30Op::F64Sub { dst, .. }
+                    | U30Op::F64Mul { dst, .. }
+                    | U30Op::F64Div { dst, .. }
+                    | U30Op::F64Sqrt { dst, .. }
+                    | U30Op::F64Abs { dst, .. }
+                    | U30Op::F64Neg { dst, .. }
+                    | U30Op::F64Min { dst, .. }
+                    | U30Op::F64Max { dst, .. }
+                    | U30Op::I64F64 { dst, .. }
+                    | U30Op::F64I64 { dst, .. }
+                    | U30Op::F32F64 { dst, .. }
+                    | U30Op::F64F32 { dst, .. }
+                    | U30Op::ReinterpretF64U64 { dst, .. }
+                    | U30Op::ReinterpretU64F64 { dst, .. }
+                    | U30Op::SExtI8U16 { dst, .. }
+                    | U30Op::SExtI8U32 { dst, .. }
+                    | U30Op::SExtI8U64 { dst, .. }
+                    | U30Op::SExtI16U32 { dst, .. }
+                    | U30Op::SExtI16U64 { dst, .. }
+                    | U30Op::SExtI32U64 { dst, .. }
+                    | U30Op::ByteSwapU16 { dst, .. }
+                    | U30Op::ByteSwapU32 { dst, .. }
+                    | U30Op::ByteSwapU64 { dst, .. }
                     | U30Op::ZExtI8U16 { dst, .. }
                     | U30Op::ZExtI8U32 { dst, .. }
                     | U30Op::ZExtI8U64 { dst, .. }
@@ -436,7 +508,12 @@ impl U30Module {
                     | U30Op::FLt { a, b, .. }
                     | U30Op::FGt { a, b, .. }
                     | U30Op::FLe { a, b, .. }
-                    | U30Op::FGe { a, b, .. } => {
+                    | U30Op::FGe { a, b, .. }
+                    | U30Op::F64Eq { a, b, .. }
+                    | U30Op::F64Lt { a, b, .. }
+                    | U30Op::F64Gt { a, b, .. }
+                    | U30Op::F64Le { a, b, .. }
+                    | U30Op::F64Ge { a, b, .. } => {
                         if !defined.contains(a) {
                             return Err(Error::Verification(format!(
                                 "U30X function {fn_index} block {block_index}: undefined source value %{a}"
@@ -488,7 +565,13 @@ impl U30Module {
                     | U30Op::FMul { a, b, .. }
                     | U30Op::FDiv { a, b, .. }
                     | U30Op::FMin { a, b, .. }
-                    | U30Op::FMax { a, b, .. } => {
+                    | U30Op::FMax { a, b, .. }
+                    | U30Op::F64Add { a, b, .. }
+                    | U30Op::F64Sub { a, b, .. }
+                    | U30Op::F64Mul { a, b, .. }
+                    | U30Op::F64Div { a, b, .. }
+                    | U30Op::F64Min { a, b, .. }
+                    | U30Op::F64Max { a, b, .. } => {
                         if !defined.contains(a) {
                             return Err(Error::Verification(format!(
                                 "U30X function {fn_index} block {block_index}: undefined a value %{a}"
@@ -503,6 +586,9 @@ impl U30Module {
                     U30Op::FSqrt { src, .. }
                     | U30Op::FAbs { src, .. }
                     | U30Op::FNeg { src, .. }
+                    | U30Op::F64Sqrt { src, .. }
+                    | U30Op::F64Abs { src, .. }
+                    | U30Op::F64Neg { src, .. }
                     | U30Op::ZExtI8U16 { src, .. }
                     | U30Op::ZExtI8U32 { src, .. }
                     | U30Op::ZExtI8U64 { src, .. }
@@ -511,7 +597,22 @@ impl U30Module {
                     | U30Op::ZExtI32U64 { src, .. }
                     | U30Op::TruncU64U32 { src, .. }
                     | U30Op::TruncU64U16 { src, .. }
-                    | U30Op::TruncU32U16 { src, .. } => {
+                    | U30Op::TruncU32U16 { src, .. }
+                    | U30Op::SExtI8U16 { src, .. }
+                    | U30Op::SExtI8U32 { src, .. }
+                    | U30Op::SExtI8U64 { src, .. }
+                    | U30Op::SExtI16U32 { src, .. }
+                    | U30Op::SExtI16U64 { src, .. }
+                    | U30Op::SExtI32U64 { src, .. }
+                    | U30Op::ByteSwapU16 { src, .. }
+                    | U30Op::ByteSwapU32 { src, .. }
+                    | U30Op::ByteSwapU64 { src, .. }
+                    | U30Op::I64F64 { src, .. }
+                    | U30Op::F64I64 { src, .. }
+                    | U30Op::F32F64 { src, .. }
+                    | U30Op::F64F32 { src, .. }
+                    | U30Op::ReinterpretF64U64 { src, .. }
+                    | U30Op::ReinterpretU64F64 { src, .. } => {
                         if !defined.contains(src) {
                             return Err(Error::Verification(format!(
                                 "U30X function {fn_index} block {block_index}: undefined src value %{src}"
@@ -554,10 +655,15 @@ impl U30Module {
                             return Err(Error::Verification(format!("U30X undefined delta")));
                         }
                     }
-                    U30Op::Call { function: _, args, results: _ } => {
+                    U30Op::Call { function: _, args, results } => {
                         for r in args {
                             if !defined.contains(r) {
                                 return Err(Error::Verification(format!("U30X undefined arg")));
+                            }
+                        }
+                        for r in results {
+                            if !defined.contains(r) {
+                                return Err(Error::Verification(format!("U30X undefined result")));
                             }
                         }
                     }
