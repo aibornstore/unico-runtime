@@ -124,6 +124,34 @@ impl U30Runtime {
                         *else_target
                     };
                 }
+                U30Terminator::TailCall { function: fn_reg, args } => {
+                    // Read function index from register
+                    let fn_idx = self.reg(&regs, *fn_reg)?.as_u64()? as usize;
+                    if fn_idx >= module.functions.len() {
+                        return Err(Error::Generic(format!("U30X TailCall: function index {} out of bounds", fn_idx)));
+                    }
+                    let callee_fn = &module.functions[fn_idx];
+                    // Collect args from current regs before resetting
+                    let arg_values: Vec<U30Value> = args.iter()
+                        .map(|&arg_reg| self.reg(&regs, arg_reg))
+                        .collect::<Result<Vec<_>>>()?
+                        .into_iter()
+                        .cloned()
+                        .collect();
+                    // Set up callee registers (replaces current frame — no call stack push)
+                    regs = BTreeMap::new();
+                    for (i, arg_val) in arg_values.into_iter().enumerate() {
+                        if i < callee_fn.params.len() {
+                            regs.insert(i as u32, arg_val);
+                        }
+                    }
+                    // Jump to callee entry — this REPLACES our frame
+                    current_fn_idx = fn_idx;
+                    function_idx = fn_idx;
+                    block_index = module.functions[fn_idx].entry_block;
+                    // returned_from_call stays false — we're not returning, we're jumping
+                    continue 'outer;
+                }
                 U30Terminator::Ret { values } => {
                     // Check if we need to return to a caller
                     if let Some((ret_fn_idx, ret_block, result_regs, caller_regs, mut callee_saved)) = call_stack.pop() {
@@ -2376,5 +2404,125 @@ mod tests {
         };
         let out = U30Runtime::default().execute_experimental(&module, &[]).expect("ok");
         assert_eq!(out.results[0].as_u64().unwrap(), 42);
+    }
+
+    #[test]
+    fn u30x_nested_call_works() {
+        // Function 0: add_one(x: U64) -> U64
+        // Adds 1 to param and returns
+        let add_one = U30Function {
+            params: vec![U30Type::U64],
+            results: vec![U30Type::U64],
+            blocks: vec![U30Block {
+                ops: vec![
+                    U30Op::Const { dst: 1, value: U30Value::U64(1) },
+                    U30Op::Binary { dst: 0, op: U30BinaryOp::AddWrapU64, a: 0, b: 1 },
+                ],
+                terminator: U30Terminator::Ret { values: vec![0] },
+            }],
+            entry_block: 0,
+        };
+        // Function 1: helper(x: U64) -> U64
+        // Calls add_one with x+1
+        let helper = U30Function {
+            params: vec![U30Type::U64],
+            results: vec![U30Type::U64],
+            blocks: vec![U30Block {
+                ops: vec![
+                    U30Op::Const { dst: 1, value: U30Value::U64(1) },
+                    U30Op::Binary { dst: 2, op: U30BinaryOp::AddWrapU64, a: 0, b: 1 }, // r2 = x + 1
+                    U30Op::Const { dst: 3, value: U30Value::U64(0) }, // fn_idx = add_one
+                    U30Op::Call { function: 3, args: vec![2], results: vec![4] },
+                ],
+                terminator: U30Terminator::Ret { values: vec![4] },
+            }],
+            entry_block: 0,
+        };
+        // Function 2: main() -> U64
+        // Calls helper(doule(arg)), which calls add_one
+        let main_fn = U30Function {
+            params: vec![],
+            results: vec![U30Type::U64],
+            blocks: vec![U30Block {
+                ops: vec![
+                    U30Op::Const { dst: 0, value: U30Value::U64(10) }, // r0 = 10
+                    U30Op::Const { dst: 1, value: U30Value::U64(2) },  // r1 = 2
+                    U30Op::Binary { dst: 2, op: U30BinaryOp::MulWrapU64, a: 0, b: 1 }, // r2 = 20
+                    U30Op::Const { dst: 3, value: U30Value::U64(1) },  // fn_idx = helper
+                    U30Op::Call { function: 3, args: vec![2], results: vec![4] },
+                ],
+                terminator: U30Terminator::Ret { values: vec![4] },
+            }],
+            entry_block: 0,
+        };
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![add_one, helper, main_fn],
+            entry_function: 2,
+        };
+        // main: 10*2 = 20 → helper(20): 20+1 = 21 → add_one(21): 22
+        let out = U30Runtime::default().execute_experimental(&module, &[]).expect("ok");
+        assert_eq!(out.results[0].as_u64().unwrap(), 22);
+    }
+
+    #[test]
+    fn u30x_tail_call_works() {
+        // Function 0: double(x: U64) -> U64
+        // Doubles param and returns
+        let double = U30Function {
+            params: vec![U30Type::U64],
+            results: vec![U30Type::U64],
+            blocks: vec![U30Block {
+                ops: vec![
+                    U30Op::Const { dst: 1, value: U30Value::U64(2) },
+                    U30Op::Binary { dst: 0, op: U30BinaryOp::MulWrapU64, a: 0, b: 1 },
+                ],
+                terminator: U30Terminator::Ret { values: vec![0] },
+            }],
+            entry_block: 0,
+        };
+        // Function 1: helper(x: U64) -> U64
+        // Tail-calls double(x+1) — replaces our frame, so caller gets double's result
+        let helper = U30Function {
+            params: vec![U30Type::U64],
+            results: vec![U30Type::U64],
+            blocks: vec![U30Block {
+                ops: vec![
+                    U30Op::Const { dst: 1, value: U30Value::U64(1) },
+                    U30Op::Binary { dst: 2, op: U30BinaryOp::AddWrapU64, a: 0, b: 1 }, // r2 = x + 1
+                    U30Op::Const { dst: 3, value: U30Value::U64(0) }, // fn_idx = double
+                ],
+                // Tail-call: jump to double(x+1), replacing helper's frame
+                // double's return value goes directly to main's caller
+                terminator: U30Terminator::TailCall { function: 3, args: vec![2] },
+            }],
+            entry_block: 0,
+        };
+        // Function 2: main() -> U64 (entry)
+        // Tail-calls helper(10) which tail-calls double(11)
+        let main_fn = U30Function {
+            params: vec![],
+            results: vec![U30Type::U64],
+            blocks: vec![U30Block {
+                ops: vec![
+                    U30Op::Const { dst: 0, value: U30Value::U64(10) }, // arg = 10
+                    U30Op::Const { dst: 1, value: U30Value::U64(1) }, // fn_idx = helper
+                ],
+                // Tail-call: jump to helper(10), replacing main's frame
+                // double(11) returns 22 directly
+                terminator: U30Terminator::TailCall { function: 1, args: vec![0] },
+            }],
+            entry_block: 0,
+        };
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![double, helper, main_fn],
+            entry_function: 2,
+        };
+        // main TailCall helper(10) → helper TailCall double(11) → returns 22
+        let out = U30Runtime::default().execute_experimental(&module, &[]).expect("ok");
+        assert_eq!(out.results[0].as_u64().unwrap(), 22);
     }
 }

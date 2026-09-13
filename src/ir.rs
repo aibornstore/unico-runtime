@@ -259,6 +259,9 @@ pub enum U30Terminator {
     Br { target: usize },
     BrIf { cond: u32, then_target: usize, else_target: usize },
     Ret { values: Vec<u32> },
+    /// Tail-call: transfer control to another function, replacing the current frame.
+    /// No return address is saved — the callee's return goes to our caller.
+    TailCall { function: u32, args: Vec<u32> },
     Trap { code: u32 },
 }
 
@@ -688,7 +691,7 @@ impl U30Module {
                     U30Op::Nop => {}
                 }
             }
-            self.verify_terminator(fn_index, block_index, function, &block.terminator)?;
+            self.verify_terminator(fn_index, block_index, function, &block.terminator, &defined)?;
         }
         Ok(())
     }
@@ -699,6 +702,7 @@ impl U30Module {
         block_index: usize,
         function: &U30Function,
         term: &U30Terminator,
+        defined: &BTreeSet<u32>,
     ) -> Result<()> {
         let block_count = function.blocks.len();
         match term {
@@ -715,6 +719,14 @@ impl U30Module {
             U30Terminator::Ret { values } => {
                 if values.len() != function.results.len() {
                     return Err(Error::Verification(format!("U30X fn {fn_index} block {block_index}: bad result arity")));
+                }
+            }
+            U30Terminator::TailCall { function: fn_idx, args } => {
+                // Args must be defined
+                for r in args {
+                    if !defined.contains(r) {
+                        return Err(Error::Verification(format!("U30X fn {fn_index} block {block_index}: undefined arg in TailCall")));
+                    }
                 }
             }
             U30Terminator::Trap { .. } => {}
