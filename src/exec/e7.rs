@@ -1209,22 +1209,31 @@ impl E7Executor {
                     let (a128, _) = a_bi5.to_130();
                     let (b128, _) = b_bi5.to_130();
                     let (m128, _) = m_bi5.to_130();
-                    let result128 = a128.wrapping_mul(b128) % m128;
+                    let result128 = if m128 == 0 { 0 } else { a128.wrapping_mul(b128) % m128 };
                     let result_bi5 = BI5::from_130(result128, 0);
                     let mut out = [0u8; 32];
                     let result_bytes = result_bi5.to_le_bytes();
                     out[..32.min(result_bytes.len())].copy_from_slice(&result_bytes[..32.min(result_bytes.len())]);
                     self.store_vreg(*dst, &out);
                 }
-                Instruction::AddMod { dst, a, b, m: _ } => {
+                Instruction::AddMod { dst, a, b, m } => {
                     let a_data = self.load_vreg(*a);
                     let b_data = self.load_vreg(*b);
-                    if a_data.len() < 16 || b_data.len() < 16 { return Err(Error::Format("AddMod: need 16-byte operands".to_string())); }
+                    let m_data = self.load_vreg(*m);
+                    if a_data.len() < 16 || b_data.len() < 16 || m_data.len() < 16 {
+                        return Err(Error::Format("AddMod: need 16-byte operands".to_string()));
+                    }
                     let a_bi5 = BI5::from_le_bytes(&a_data[..32.min(a_data.len())]);
                     let b_bi5 = BI5::from_le_bytes(&b_data[..32.min(b_data.len())]);
-                    let result = a_bi5.add(&b_bi5);
+                    let m_bi5 = BI5::from_le_bytes(&m_data[..32.min(m_data.len())]);
+                    let sum = a_bi5.add(&b_bi5);
+                    let (sum_lo, _) = sum.to_130();
+                    let (m_lo, _) = m_bi5.to_130();
+                    // sum may be up to 2*m; subtract once if >= m
+                    let result128 = if sum_lo >= m_lo { sum_lo - m_lo } else { sum_lo };
+                    let result_bi5 = BI5::from_130(result128, 0);
                     let mut out = [0u8; 32];
-                    let result_bytes = result.to_le_bytes();
+                    let result_bytes = result_bi5.to_le_bytes();
                     out[..32.min(result_bytes.len())].copy_from_slice(&result_bytes[..32.min(result_bytes.len())]);
                     self.store_vreg(*dst, &out);
                 }
@@ -1240,14 +1249,19 @@ impl E7Executor {
                     let m_bi = BI5::from_le_bytes(&m_data[..32.min(m_data.len())]);
                     let (base128, _) = base_bi.to_130();
                     let (m128, _) = m_bi.to_130();
+                    if m128 == 0 {
+                        return Err(Error::Format("ModExp: modulus is zero".to_string()));
+                    }
+                    // Square-and-multiply over all 130 bits of exponent
                     let mut result = 1u128;
-                    let mut exp128 = base128;
-                    for i in 0..5 {
-                        let exp_limb = exp_bi.0[i];
-                        for bit in 0..64 {
-                            if (exp_limb >> bit) & 1 == 1 { result = result.wrapping_mul(exp128) % m128; }
-                            exp128 = exp128.wrapping_mul(exp128) % m128;
+                    let mut base_acc = base128 % m128;
+                    for i in 0..130u32 {
+                        let limb = (i / 64) as usize;
+                        let bit = i % 64;
+                        if (exp_bi.0[limb] >> bit) & 1 == 1 {
+                            result = result.wrapping_mul(base_acc) % m128;
                         }
+                        base_acc = base_acc.wrapping_mul(base_acc) % m128;
                     }
                     let result_bi = BI5::from_130(result, 0);
                     let mut out = [0u8; 32];

@@ -9,3 +9,6 @@ description = "UNICO v3.0 Execution Runtime"
 thiserror = "1.0"
 hex = "0.4"
 rand = "0.8"
+
+[dev-dependencies]
+criterion = "0.4"
