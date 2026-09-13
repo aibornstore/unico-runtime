@@ -426,7 +426,8 @@ impl U30Module {
                     | U30Op::Nop => None,
                 };
                 if let Some(dst) = dst {
-                    if !defined.insert(dst) {
+                    // Parameters can be overwritten (SSA allows assigning over parameters)
+                    if dst >= function.params.len() as u32 && !defined.insert(dst) {
                         return Err(Error::Verification(format!(
                             "U30X function {fn_index} redefines value %{dst}"
                         )));
@@ -661,10 +662,9 @@ impl U30Module {
                                 return Err(Error::Verification(format!("U30X undefined arg")));
                             }
                         }
+                        // Call defines its result registers
                         for r in results {
-                            if !defined.contains(r) {
-                                return Err(Error::Verification(format!("U30X undefined result")));
-                            }
+                            defined.insert(*r);
                         }
                     }
                     U30Op::TableBr { table, index } => {

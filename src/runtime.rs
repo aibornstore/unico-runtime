@@ -42,11 +42,12 @@ impl U30Runtime {
         args: &[U30Value],
     ) -> Result<U30ExecutionOutcome> {
         module.verify_experimental()?;
-        let function = &module.functions[module.entry_function];
-        if args.len() != function.params.len() {
+        let mut current_fn_idx = module.entry_function;
+        let mut function_idx = module.entry_function;
+        if args.len() != module.functions[function_idx].params.len() {
             return Err(Error::Verification("U30X entry argument arity mismatch".into()));
         }
-        for (index, (arg, expected)) in args.iter().zip(&function.params).enumerate() {
+        for (index, (arg, expected)) in args.iter().zip(&module.functions[function_idx].params).enumerate() {
             if arg.value_type() != *expected {
                 return Err(Error::Verification(format!(
                     "U30X entry argument {index} type mismatch"
@@ -59,18 +60,63 @@ impl U30Runtime {
             regs.insert(index as u32, arg);
         }
         let mut regions = self.instantiate_regions(module)?;
-        let mut block_index = function.entry_block;
+        let mut block_index = module.functions[function_idx].entry_block;
         let mut steps = 0u64;
+        // Call stack: (return_function_index, return_block, result_regs, caller_regs, callee_regs_at_call)
+        let mut call_stack: Vec<(usize, usize, Vec<u32>, BTreeMap<u32, U30Value>, BTreeMap<u32, U30Value>)> = Vec::new();
+        let mut returned_from_call = false;
 
-        loop {
-            let block = &function.blocks[block_index];
-            for op in &block.ops {
-                self.charge(&mut steps)?;
-                self.exec_op(op, &mut regs, &mut regions)?;
+        'outer: loop {
+            let block = &module.functions[function_idx].blocks[block_index];
+            // If we just returned from a call, skip straight to the terminator
+            // (skip re-executing the Call instruction in the caller)
+            if !returned_from_call {
+                for op in &block.ops {
+                    self.charge(&mut steps)?;
+                    match op {
+                        U30Op::Call { function: fn_reg, args, results: result_regs } => {
+                            // Read function index from register
+                            let fn_idx = self.reg(&regs, *fn_reg)?.as_u64()? as usize;
+                            if fn_idx >= module.functions.len() {
+                                return Err(Error::Generic(format!("U30X call: function index {} out of bounds", fn_idx)));
+                            }
+                            // Save caller state (before Call modifies regs)
+                            let caller_regs = regs.clone();
+                            let callee_regs = BTreeMap::new();
+                            call_stack.push((current_fn_idx, block_index, result_regs.clone(), caller_regs, callee_regs));
+                            // Set up callee registers from args
+                            regs = BTreeMap::new();
+                            for (i, &arg_reg) in args.iter().enumerate() {
+                                if i < module.functions[fn_idx].params.len() {
+                                    // Read arg from caller's saved registers (top of stack)
+                                    let arg_val = self.reg(&call_stack.last().unwrap().3, arg_reg)?.clone();
+                                    regs.insert(i as u32, arg_val);
+                                }
+                            }
+                            // Jump to callee entry
+                            current_fn_idx = fn_idx;
+                            function_idx = fn_idx;
+                            block_index = module.functions[fn_idx].entry_block;
+                            returned_from_call = false;
+                            continue 'outer; // restart outer loop with fresh block evaluation
+                        }
+                        _ => {
+                            self.exec_op(op, &mut regs, &mut regions)?;
+                        }
+                    }
+                }
             }
-            self.charge(&mut steps)?;
-            match &block.terminator {
-                U30Terminator::Br { target } => block_index = *target,
+            self.charge(&mut steps)?; // charge once per block iteration (for terminator)
+            // Always recompute terminator from current function/block to avoid stale references
+            let terminator = &module.functions[function_idx].blocks[block_index].terminator;
+            match terminator {
+                U30Terminator::Br { target } => {
+                    block_index = *target;
+                    // If we just returned from a call, reset the flag after handling terminator
+                    if returned_from_call {
+                        returned_from_call = false;
+                    }
+                }
                 U30Terminator::BrIf { cond, then_target, else_target } => {
                     block_index = if self.reg(&regs, *cond)?.as_bool()? {
                         *then_target
@@ -79,20 +125,53 @@ impl U30Runtime {
                     };
                 }
                 U30Terminator::Ret { values } => {
-                    let results = values
-                        .iter()
-                        .map(|id| self.reg(&regs, *id).cloned())
-                        .collect::<Result<Vec<_>>>()?;
-                    for (value, expected) in results.iter().zip(&function.results) {
-                        if value.value_type() != *expected {
-                            return Err(Error::Generic("U30X return type mismatch".into()));
+                    // Check if we need to return to a caller
+                    if let Some((ret_fn_idx, ret_block, result_regs, caller_regs, mut callee_saved)) = call_stack.pop() {
+                        // Save callee's final registers before popping
+                        callee_saved.clone_from(&regs);
+                        // Collect return values from callee's registers
+                        let ret_values: Vec<U30Value> = values
+                            .iter()
+                            .map(|id| callee_saved.get(id).cloned()
+                                .ok_or_else(|| Error::Generic(format!("U30X undefined value %{id}"))))
+                            .collect::<Result<Vec<_>>>()?;
+                        for (value, expected) in ret_values.iter().zip(&module.functions[current_fn_idx].results) {
+                            if value.value_type() != *expected {
+                                return Err(Error::Generic("U30X return type mismatch".into()));
+                            }
                         }
+                        // Copy return values into caller's registers at result positions
+                        let mut caller = caller_regs;
+                        for (&callee_reg, &caller_reg) in values.iter().zip(result_regs.iter()) {
+                            if let Some(rv) = callee_saved.get(&callee_reg).cloned() {
+                                caller.insert(caller_reg, rv);
+                            }
+                        }
+                        // Restore caller regs and continue
+                        current_fn_idx = ret_fn_idx;
+                        function_idx = ret_fn_idx;
+                        block_index = ret_block;
+                        regs = caller;
+                        // We just returned from a call, so skip to terminator in next iteration
+                        returned_from_call = true;
+                        continue 'outer;
+                    } else {
+                        // Top-level return
+                        let results = values
+                            .iter()
+                            .map(|id| self.reg(&regs, *id).cloned())
+                            .collect::<Result<Vec<_>>>()?;
+                        for (value, expected) in results.iter().zip(&module.functions[function_idx].results) {
+                            if value.value_type() != *expected {
+                                return Err(Error::Generic("U30X return type mismatch".into()));
+                            }
+                        }
+                        let output_regions = regions
+                            .into_iter()
+                            .map(|(id, state)| (id, state.bytes))
+                            .collect();
+                        return Ok(U30ExecutionOutcome { results, regions: output_regions, steps });
                     }
-                    let output_regions = regions
-                        .into_iter()
-                        .map(|(id, state)| (id, state.bytes))
-                        .collect();
-                    return Ok(U30ExecutionOutcome { results, regions: output_regions, steps });
                 }
                 U30Terminator::Trap { code } => {
                     return Err(Error::Generic(format!("U30X explicit trap {code}")));
@@ -550,9 +629,6 @@ impl U30Runtime {
                 state.bytes.resize(old_size + d, 0);
                 regs.insert(*dst, U30Value::U64(old_size as u64));
             }
-            U30Op::Call { function: _, args: _, results: _ } => {
-                return Err(Error::Generic("U30X call not yet implemented".into()));
-            }
             U30Op::TableBr { table: _, index: _ } => {
                 return Err(Error::Generic("U30X tablebr not yet implemented".into()));
             }
@@ -567,6 +643,9 @@ impl U30Runtime {
                 }
             }
             U30Op::Nop => {}
+            U30Op::Call { .. } => {
+                // Call is handled in the main execution loop, not here
+            }
         }
         Ok(())
     }
@@ -2256,5 +2335,46 @@ mod tests {
         assert_eq!(out.results[0].as_u16().unwrap(), 0x3412);
         assert_eq!(out.results[1].as_u32().unwrap(), 0xEFBEADDE);
         assert_eq!(out.results[2].as_u64().unwrap(), 0xEFCDAB8967452301u64);
+    }
+
+    #[test]
+    fn u30x_call_works() {
+        // Function 0: add_one(x: U64) -> U64
+        // Adds 1 to input and returns
+        let add_one = U30Function {
+            params: vec![U30Type::U64],
+            results: vec![U30Type::U64],
+            blocks: vec![U30Block {
+                ops: vec![
+                    U30Op::Const { dst: 1, value: U30Value::U64(1) },
+                    U30Op::Binary { dst: 0, op: U30BinaryOp::AddWrapU64, a: 0, b: 1 },
+                ],
+                terminator: U30Terminator::Ret { values: vec![0] },
+            }],
+            entry_block: 0,
+        };
+        // Function 1: main() -> U64
+        // Calls add_one(41), returns result
+        let main_fn = U30Function {
+            params: vec![],
+            results: vec![U30Type::U64],
+            blocks: vec![U30Block {
+                ops: vec![
+                    U30Op::Const { dst: 0, value: U30Value::U64(41) },
+                    U30Op::Const { dst: 1, value: U30Value::U64(0) }, // fn_idx = add_one
+                    U30Op::Call { function: 1, args: vec![0], results: vec![2] },
+                ],
+                terminator: U30Terminator::Ret { values: vec![2] },
+            }],
+            entry_block: 0,
+        };
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![add_one, main_fn],
+            entry_function: 1,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).expect("ok");
+        assert_eq!(out.results[0].as_u64().unwrap(), 42);
     }
 }
