@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 pub enum U30Type {
     Bool,
     U8,
+    U16,
     U32,
     U64,
 }
@@ -19,6 +20,7 @@ pub enum U30Type {
 pub enum U30Value {
     Bool(bool),
     U8(u8),
+    U16(u16),
     U32(u32),
     U64(u64),
 }
@@ -28,6 +30,7 @@ impl U30Value {
         match self {
             Self::Bool(_) => U30Type::Bool,
             Self::U8(_) => U30Type::U8,
+            Self::U16(_) => U30Type::U16,
             Self::U32(_) => U30Type::U32,
             Self::U64(_) => U30Type::U64,
         }
@@ -47,6 +50,13 @@ impl U30Value {
         }
     }
 
+    pub fn as_u16(&self) -> Result<u16> {
+        match self {
+            Self::U16(v) => Ok(*v),
+            other => Err(Error::Generic(format!("U30X type error: expected u16, got {:?}", other.value_type()))),
+        }
+    }
+
     pub fn as_u32(&self) -> Result<u32> {
         match self {
             Self::U32(v) => Ok(*v),
@@ -56,8 +66,11 @@ impl U30Value {
 
     pub fn as_u64(&self) -> Result<u64> {
         match self {
+            Self::U8(v) => Ok(*v as u64),
+            Self::U16(v) => Ok(*v as u64),
+            Self::U32(v) => Ok(*v as u64),
             Self::U64(v) => Ok(*v),
-            other => Err(Error::Generic(format!("U30X type error: expected u64, got {:?}", other.value_type()))),
+            other => Err(Error::Generic(format!("U30X type error: expected integer, got {:?}", other.value_type()))),
         }
     }
 }
@@ -75,8 +88,16 @@ pub struct U30RegionDecl {
 pub enum U30BinaryOp {
     AddWrapU64,
     AddWrapU32,
+    SubWrapU64,
+    SubWrapU32,
+    MulWrapU64,
+    MulWrapU32,
     AndU8,
     OrU8,
+    XorU8,
+    ShlU64,
+    ShrU64,
+    ShrU32,
     Eq,
     LtU64,
 }
@@ -87,6 +108,12 @@ pub enum U30Op {
     Binary { dst: u32, op: U30BinaryOp, a: u32, b: u32 },
     LoadU8 { dst: u32, region: u32, offset: u32 },
     StoreU8 { region: u32, offset: u32, src: u32 },
+    LoadU16 { dst: u32, region: u32, offset: u32 },
+    StoreU16 { region: u32, offset: u32, src: u32 },
+    LoadU32 { dst: u32, region: u32, offset: u32 },
+    StoreU32 { region: u32, offset: u32, src: u32 },
+    LoadU64 { dst: u32, region: u32, offset: u32 },
+    StoreU64 { region: u32, offset: u32, src: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,8 +180,14 @@ impl U30Module {
                 let dst = match op {
                     U30Op::Const { dst, .. }
                     | U30Op::Binary { dst, .. }
-                    | U30Op::LoadU8 { dst, .. } => Some(*dst),
-                    U30Op::StoreU8 { .. } => None,
+                    | U30Op::LoadU8 { dst, .. }
+                    | U30Op::LoadU16 { dst, .. }
+                    | U30Op::LoadU32 { dst, .. }
+                    | U30Op::LoadU64 { dst, .. } => Some(*dst),
+                    U30Op::StoreU8 { .. }
+                    | U30Op::StoreU16 { .. }
+                    | U30Op::StoreU32 { .. }
+                    | U30Op::StoreU64 { .. } => None,
                 };
                 if let Some(dst) = dst {
                     if !defined.insert(dst) {
@@ -164,7 +197,10 @@ impl U30Module {
                     }
                 }
                 match op {
-                    U30Op::LoadU8 { region, .. } | U30Op::StoreU8 { region, .. } => {
+                    U30Op::LoadU8 { region, .. } | U30Op::StoreU8 { region, .. }
+                    | U30Op::LoadU16 { region, .. } | U30Op::StoreU16 { region, .. }
+                    | U30Op::LoadU32 { region, .. } | U30Op::StoreU32 { region, .. }
+                    | U30Op::LoadU64 { region, .. } | U30Op::StoreU64 { region, .. } => {
                         if !region_ids.contains(region) {
                             return Err(Error::Verification(format!(
                                 "U30X function {fn_index} references unknown region {region}"
