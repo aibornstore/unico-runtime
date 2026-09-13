@@ -14,15 +14,17 @@ pub enum U30Type {
     U16,
     U32,
     U64,
+    F32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum U30Value {
     Bool(bool),
     U8(u8),
     U16(u16),
     U32(u32),
     U64(u64),
+    F32(f32),
 }
 
 impl U30Value {
@@ -33,6 +35,7 @@ impl U30Value {
             Self::U16(_) => U30Type::U16,
             Self::U32(_) => U30Type::U32,
             Self::U64(_) => U30Type::U64,
+            Self::F32(_) => U30Type::F32,
         }
     }
 
@@ -71,6 +74,23 @@ impl U30Value {
             Self::U32(v) => Ok(*v as u64),
             Self::U64(v) => Ok(*v),
             other => Err(Error::Generic(format!("U30X type error: expected integer, got {:?}", other.value_type()))),
+        }
+    }
+
+    pub fn as_i64(&self) -> Result<i64> {
+        match self {
+            Self::U8(v) => Ok(*v as i64),
+            Self::U16(v) => Ok(*v as i64),
+            Self::U32(v) => Ok(*v as i64),
+            Self::U64(v) => Ok(*v as i64),
+            other => Err(Error::Generic(format!("U30X type error: expected integer, got {:?}", other.value_type()))),
+        }
+    }
+
+    pub fn as_f32(&self) -> Result<f32> {
+        match self {
+            Self::F32(v) => Ok(*v),
+            other => Err(Error::Generic(format!("U30X type error: expected f32, got {:?}", other.value_type()))),
         }
     }
 }
@@ -115,7 +135,7 @@ pub enum U30BinaryOp {
     MaxU32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum U30Op {
     Const { dst: u32, value: U30Value },
     Binary { dst: u32, op: U30BinaryOp, a: u32, b: u32 },
@@ -124,6 +144,7 @@ pub enum U30Op {
     NotU16 { dst: u32, src: u32 },
     NotU32 { dst: u32, src: u32 },
     NotU64 { dst: u32, src: u32 },
+    I2F { dst: u32, src: u32 },
     LoadU8 { dst: u32, region: u32, offset: u32 },
     StoreU8 { region: u32, offset: u32, src: u32 },
     LoadU16 { dst: u32, region: u32, offset: u32 },
@@ -142,13 +163,13 @@ pub enum U30Terminator {
     Trap { code: u32 },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct U30Block {
     pub ops: Vec<U30Op>,
     pub terminator: U30Terminator,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct U30Function {
     pub params: Vec<U30Type>,
     pub results: Vec<U30Type>,
@@ -156,7 +177,7 @@ pub struct U30Function {
     pub entry_block: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct U30Module {
     pub regions: Vec<U30RegionDecl>,
     pub functions: Vec<U30Function>,
@@ -203,6 +224,7 @@ impl U30Module {
                     | U30Op::NotU16 { dst, .. }
                     | U30Op::NotU32 { dst, .. }
                     | U30Op::NotU64 { dst, .. }
+                    | U30Op::I2F { dst, .. }
                     | U30Op::LoadU8 { dst, .. }
                     | U30Op::LoadU16 { dst, .. }
                     | U30Op::LoadU32 { dst, .. }
@@ -254,7 +276,8 @@ impl U30Module {
                     U30Op::NotU8 { src, .. }
                     | U30Op::NotU16 { src, .. }
                     | U30Op::NotU32 { src, .. }
-                    | U30Op::NotU64 { src, .. } => {
+                    | U30Op::NotU64 { src, .. }
+                    | U30Op::I2F { src, .. } => {
                         if !defined.contains(src) {
                             return Err(Error::Verification(format!(
                                 "U30X function {fn_index} block {block_index}: undefined source value %{src}"

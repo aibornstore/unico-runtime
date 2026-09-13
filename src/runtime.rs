@@ -10,7 +10,7 @@ use crate::ir::{
 };
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct U30ExecutionOutcome {
     pub results: Vec<U30Value>,
     pub regions: BTreeMap<u32, Vec<u8>>,
@@ -169,6 +169,10 @@ impl U30Runtime {
             U30Op::NotU64 { dst, src } => {
                 let v = self.reg(regs, *src)?.as_u64()?;
                 regs.insert(*dst, U30Value::U64(!v));
+            }
+            U30Op::I2F { dst, src } => {
+                let v = self.reg(regs, *src)?.as_u64()? as f32;
+                regs.insert(*dst, U30Value::F32(v));
             }
             U30Op::LoadU8 { dst, region, offset } => {
                 let offset = self.reg(regs, *offset)?.as_u64()? as usize;
@@ -1110,5 +1114,28 @@ mod tests {
             .execute_experimental(&module, &[])
             .expect_err("div by zero must fail");
         assert!(err.to_string().contains("div by zero"));
+    }
+
+    #[test]
+    fn u30x_i2f_works() {
+        let module = U30Module {
+            regions: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U32],
+                results: vec![U30Type::F32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::I2F { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::U32(42)])
+            .expect("i2f");
+        assert_eq!(out.results, vec![U30Value::F32(42.0)]);
     }
 }
