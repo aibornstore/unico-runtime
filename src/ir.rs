@@ -306,11 +306,7 @@ impl U30Module {
             if !table_ids.insert(table.id) {
                 return Err(Error::Verification(format!("U30X duplicate table {}", table.id)));
             }
-            for &target in &table.targets {
-                if target >= self.functions.len() {
-                    return Err(Error::Verification(format!("U30X table {} has invalid target block", table.id)));
-                }
-            }
+            // Note: per-target block validation deferred to verify_function (knows block count)
         }
         for (fn_index, function) in self.functions.iter().enumerate() {
             self.verify_function(fn_index, function, &region_ids, &table_ids)?;
@@ -330,9 +326,9 @@ impl U30Module {
         }
         let mut global_defined: BTreeSet<u32> = (0..function.params.len() as u32).collect();
         for (block_index, block) in function.blocks.iter().enumerate() {
-            // Each block has its own definition scope; start from params
-            // (params are live-in to all blocks), but allow redefinition within block
-            let mut block_defined: BTreeSet<u32> = global_defined.clone();
+            // Each block has its own definition scope; start fresh from params only.
+            // Block-local definitions don't leak to other blocks (no SSA phi-nodes).
+            let mut block_defined: BTreeSet<u32> = (0..function.params.len() as u32).collect();
             let mut defined = &mut block_defined; // local alias for brevity
             for op in &block.ops {
                 let dst = match op {
@@ -681,6 +677,14 @@ impl U30Module {
                         }
                         if !defined.contains(index) {
                             return Err(Error::Verification(format!("U30X undefined table index")));
+                        }
+                        // Validate table target block indices
+                        if let Some(table_decl) = self.tables.iter().find(|t| t.id == *table) {
+                            for &target in &table_decl.targets {
+                                if target >= function.blocks.len() {
+                                    return Err(Error::Verification(format!("U30X table {} has invalid target block {}", table, target)));
+                                }
+                            }
                         }
                     }
                     U30Op::Break { code } => {
