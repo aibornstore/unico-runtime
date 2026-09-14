@@ -159,6 +159,12 @@ pub struct E4Executor {
     fuel: u64,
     host_functions: HostFunctions,
     host_calls: u32,
+    /// Instruction execution histogram (count per instruction type name)
+    pub histogram: std::collections::HashMap<&'static str, u64>,
+    /// Execution trace: list of executed instructions (for debugging)
+    pub trace: Vec<&'static str>,
+    /// Enable profiling (histogram + trace)
+    profiling: bool,
 }
 
 impl Default for E4Executor {
@@ -168,6 +174,9 @@ impl Default for E4Executor {
             fuel: 100_000,
             host_functions: HostFunctions::new(),
             host_calls: 0,
+            histogram: std::collections::HashMap::new(),
+            trace: Vec::new(),
+            profiling: false,
         }
     }
 }
@@ -186,6 +195,35 @@ impl E4Executor {
     /// Access the host function registry for registration.
     pub fn host_functions_mut(&mut self) -> &mut HostFunctions {
         &mut self.host_functions
+    }
+
+    /// Enable profiling (instruction histogram + execution trace).
+    pub fn start_profiling(&mut self) {
+        self.profiling = true;
+        self.histogram.clear();
+        self.trace.clear();
+    }
+
+    /// Get profiling histogram. Requires start_profiling() called before execute().
+    pub fn histogram(&self) -> &std::collections::HashMap<&'static str, u64> {
+        &self.histogram
+    }
+
+    /// Get execution trace. Requires start_profiling() called before execute().
+    pub fn trace(&self) -> &[&'static str] {
+        &self.trace
+    }
+
+    /// Get total instruction count from histogram.
+    pub fn total_instructions(&self) -> u64 {
+        self.histogram.values().sum()
+    }
+
+    fn record_instruction(&mut self, name: &'static str) {
+        if self.profiling {
+            *self.histogram.entry(name).or_insert(0) += 1;
+            self.trace.push(name);
+        }
     }
 
     pub fn execute(&mut self, module: &E4Module, _function_index: usize) -> Result<ExecutionResult> {
@@ -207,8 +245,9 @@ impl E4Executor {
             self.fuel -= 1;
 
             match &def.code[pc] {
-                Instruction::Br { target } => pc = *target as usize,
+                Instruction::Br { target } => { self.record_instruction("Br"); pc = *target as usize; }
                 Instruction::BrIf { cond, target } => {
+                    self.record_instruction("BrIf");
                     if regs[*cond as usize].as_bool()? {
                         pc = *target as usize;
                     } else {
@@ -216,6 +255,7 @@ impl E4Executor {
                     }
                 }
                 Instruction::Ret { dst } => {
+                    self.record_instruction("Ret");
                     let val = match regs[*dst as usize] {
                         E4Value::I32(v) => v as i64,
                         E4Value::F32(v) => v.to_bits() as i64,
@@ -224,9 +264,11 @@ impl E4Executor {
                     return Ok(ExecutionResult::pass(val, self.provenance()));
                 }
                 Instruction::Trap => {
+                    self.record_instruction("Trap");
                     return Ok(ExecutionResult::fail("E4: trap".into(), self.provenance()));
                 }
                 Instruction::Cmp { pred, dst, a, b } => {
+                    self.record_instruction("Cmp");
                     let a = regs[*a as usize].as_i32()?;
                     let b = regs[*b as usize].as_i32()?;
                     let r = match pred {
@@ -239,7 +281,7 @@ impl E4Executor {
                     regs[*dst as usize] = E4Value::I32(if r { 1 } else { 0 });
                     pc += 1;
                 }
-                Instruction::LoadI64 { dst, addr } => {
+                Instruction::LoadI64 { dst, addr } => { self.record_instruction("LoadI64");
                     let addr = regs[*addr as usize].as_i32()? as usize;
                     if addr + 8 > memory.len() {
                         return Ok(ExecutionResult::fail("E4: load out of bounds".into(), self.provenance()));
@@ -249,7 +291,7 @@ impl E4Executor {
                     regs[*dst as usize] = E4Value::I32(val as i32);
                     pc += 1;
                 }
-                Instruction::StoreI64 { addr, src } => {
+                Instruction::StoreI64 { addr, src } => { self.record_instruction("StoreI64");
                     let addr = regs[*addr as usize].as_i32()? as usize;
                     let val = regs[*src as usize].as_i32()? as i64;
                     if addr + 8 > memory.len() {
@@ -258,25 +300,25 @@ impl E4Executor {
                     memory[addr..addr+8].copy_from_slice(&val.to_le_bytes());
                     pc += 1;
                 }
-                Instruction::IAdd { dst, a, b } => {
+                Instruction::IAdd { dst, a, b } => { self.record_instruction("IAdd");
                     let a = regs[*a as usize].as_i32()?;
                     let b = regs[*b as usize].as_i32()?;
                     regs[*dst as usize] = E4Value::I32(a.wrapping_add(b));
                     pc += 1;
                 }
-                Instruction::ISub { dst, a, b } => {
+                Instruction::ISub { dst, a, b } => { self.record_instruction("ISub");
                     let a = regs[*a as usize].as_i32()?;
                     let b = regs[*b as usize].as_i32()?;
                     regs[*dst as usize] = E4Value::I32(a.wrapping_sub(b));
                     pc += 1;
                 }
-                Instruction::IMul { dst, a, b } => {
+                Instruction::IMul { dst, a, b } => { self.record_instruction("IMul");
                     let a = regs[*a as usize].as_i32()?;
                     let b = regs[*b as usize].as_i32()?;
                     regs[*dst as usize] = E4Value::I32(a.wrapping_mul(b));
                     pc += 1;
                 }
-                Instruction::IDiv { dst, a, b } => {
+                Instruction::IDiv { dst, a, b } => { self.record_instruction("IDiv");
                     let a = regs[*a as usize].as_i32()?;
                     let b = regs[*b as usize].as_i32()?;
                     if b == 0 {
@@ -285,25 +327,25 @@ impl E4Executor {
                     regs[*dst as usize] = E4Value::I32(a.wrapping_div(b));
                     pc += 1;
                 }
-                Instruction::FAdd { dst, a, b } => {
+                Instruction::FAdd { dst, a, b } => { self.record_instruction("FAdd");
                     let a = regs[*a as usize].as_f32()?;
                     let b = regs[*b as usize].as_f32()?;
                     regs[*dst as usize] = E4Value::F32(a + b);
                     pc += 1;
                 }
-                Instruction::FSub { dst, a, b } => {
+                Instruction::FSub { dst, a, b } => { self.record_instruction("FSub");
                     let a = regs[*a as usize].as_f32()?;
                     let b = regs[*b as usize].as_f32()?;
                     regs[*dst as usize] = E4Value::F32(a - b);
                     pc += 1;
                 }
-                Instruction::FMul { dst, a, b } => {
+                Instruction::FMul { dst, a, b } => { self.record_instruction("FMul");
                     let a = regs[*a as usize].as_f32()?;
                     let b = regs[*b as usize].as_f32()?;
                     regs[*dst as usize] = E4Value::F32(a * b);
                     pc += 1;
                 }
-                Instruction::FDiv { dst, a, b } => {
+                Instruction::FDiv { dst, a, b } => { self.record_instruction("FDiv");
                     let a = regs[*a as usize].as_f32()?;
                     let b = regs[*b as usize].as_f32()?;
                     if b == 0.0 {
@@ -312,27 +354,27 @@ impl E4Executor {
                     regs[*dst as usize] = E4Value::F32(a / b);
                     pc += 1;
                 }
-                Instruction::FSqrt { dst, a } => {
+                Instruction::FSqrt { dst, a } => { self.record_instruction("FSqrt");
                     let a = regs[*a as usize].as_f32()?;
                     regs[*dst as usize] = E4Value::F32(a.sqrt());
                     pc += 1;
                 }
-                Instruction::FNeg { dst, a } => {
+                Instruction::FNeg { dst, a } => { self.record_instruction("FNeg");
                     let a = regs[*a as usize].as_f32()?;
                     regs[*dst as usize] = E4Value::F32(-a);
                     pc += 1;
                 }
-                Instruction::FAbs { dst, a } => {
+                Instruction::FAbs { dst, a } => { self.record_instruction("FAbs");
                     let a = regs[*a as usize].as_f32()?;
                     regs[*dst as usize] = E4Value::F32(a.abs());
                     pc += 1;
                 }
-                Instruction::FRound { dst, a } => {
+                Instruction::FRound { dst, a } => { self.record_instruction("FRound");
                     let a = regs[*a as usize].as_f32()?;
                     regs[*dst as usize] = E4Value::F32(a.round());
                     pc += 1;
                 }
-                Instruction::FCmp { pred, dst, a, b } => {
+                Instruction::FCmp { pred, dst, a, b } => { self.record_instruction("FCmp");
                     let a = regs[*a as usize].as_f32()?;
                     let b = regs[*b as usize].as_f32()?;
                     let r = match pred {
@@ -347,12 +389,12 @@ impl E4Executor {
                     regs[*dst as usize] = E4Value::I32(if r { 1 } else { 0 });
                     pc += 1;
                 }
-                Instruction::I2F { dst, a } => {
+                Instruction::I2F { dst, a } => { self.record_instruction("I2F");
                     let a = regs[*a as usize].as_i32()?;
                     regs[*dst as usize] = E4Value::F32(a as f32);
                     pc += 1;
                 }
-                Instruction::F2I { dst, a } => {
+                Instruction::F2I { dst, a } => { self.record_instruction("F2I");
                     let a = regs[*a as usize].as_f32()?;
                     if a.is_nan() || a < (i32::MIN as f32) || a > (i32::MAX as f32) {
                         return Ok(ExecutionResult::fail("E4: f2i conversion error".into(), self.provenance()));
@@ -360,12 +402,12 @@ impl E4Executor {
                     regs[*dst as usize] = E4Value::I32(a as i32);
                     pc += 1;
                 }
-                Instruction::U2F { dst, a } => {
+                Instruction::U2F { dst, a } => { self.record_instruction("U2F");
                     let a = regs[*a as usize].as_i32()?;
                     regs[*dst as usize] = E4Value::F32((a as u32) as f32);
                     pc += 1;
                 }
-                Instruction::F2U { dst, a } => {
+                Instruction::F2U { dst, a } => { self.record_instruction("F2U");
                     let a = regs[*a as usize].as_f32()?;
                     if a.is_nan() || a < 0.0 || a > (u32::MAX as f32) {
                         return Ok(ExecutionResult::fail("E4: f2u conversion error".into(), self.provenance()));
@@ -373,60 +415,60 @@ impl E4Executor {
                     regs[*dst as usize] = E4Value::I32((a as u32) as i32);
                     pc += 1;
                 }
-                Instruction::Mov { dst, src } => {
+                Instruction::Mov { dst, src } => { self.record_instruction("Mov");
                     regs[*dst as usize] = regs[*src as usize];
                     pc += 1;
                 }
-                Instruction::FImm { dst, imm } => {
+                Instruction::FImm { dst, imm } => { self.record_instruction("FImm");
                     regs[*dst as usize] = E4Value::F32(*imm);
                     pc += 1;
                 }
                 // ---- E4 f64 floating-point binary ----
-                Instruction::FAddF64 { dst, a, b } => {
+                Instruction::FAddF64 { dst, a, b } => { self.record_instruction("FAddF64");
                     let a = regs[*a as usize].as_f64()?;
                     let b = regs[*b as usize].as_f64()?;
                     regs[*dst as usize] = E4Value::F64(a + b);
                     pc += 1;
                 }
-                Instruction::FSubF64 { dst, a, b } => {
+                Instruction::FSubF64 { dst, a, b } => { self.record_instruction("FSubF64");
                     let a = regs[*a as usize].as_f64()?;
                     let b = regs[*b as usize].as_f64()?;
                     regs[*dst as usize] = E4Value::F64(a - b);
                     pc += 1;
                 }
-                Instruction::FMulF64 { dst, a, b } => {
+                Instruction::FMulF64 { dst, a, b } => { self.record_instruction("FMulF64");
                     let a = regs[*a as usize].as_f64()?;
                     let b = regs[*b as usize].as_f64()?;
                     regs[*dst as usize] = E4Value::F64(a * b);
                     pc += 1;
                 }
-                Instruction::FDivF64 { dst, a, b } => {
+                Instruction::FDivF64 { dst, a, b } => { self.record_instruction("FDivF64");
                     let a = regs[*a as usize].as_f64()?;
                     let b = regs[*b as usize].as_f64()?;
                     regs[*dst as usize] = E4Value::F64(a / b);
                     pc += 1;
                 }
-                Instruction::FSqrtF64 { dst, a } => {
+                Instruction::FSqrtF64 { dst, a } => { self.record_instruction("FSqrtF64");
                     let a = regs[*a as usize].as_f64()?;
                     regs[*dst as usize] = E4Value::F64(a.sqrt());
                     pc += 1;
                 }
-                Instruction::FNegF64 { dst, a } => {
+                Instruction::FNegF64 { dst, a } => { self.record_instruction("FNegF64");
                     let a = regs[*a as usize].as_f64()?;
                     regs[*dst as usize] = E4Value::F64(-a);
                     pc += 1;
                 }
-                Instruction::FAbsF64 { dst, a } => {
+                Instruction::FAbsF64 { dst, a } => { self.record_instruction("FAbsF64");
                     let a = regs[*a as usize].as_f64()?;
                     regs[*dst as usize] = E4Value::F64(a.abs());
                     pc += 1;
                 }
-                Instruction::FRoundF64 { dst, a } => {
+                Instruction::FRoundF64 { dst, a } => { self.record_instruction("FRoundF64");
                     let a = regs[*a as usize].as_f64()?;
                     regs[*dst as usize] = E4Value::F64(a.round());
                     pc += 1;
                 }
-                Instruction::FCmpF64 { pred, dst, a, b } => {
+                Instruction::FCmpF64 { pred, dst, a, b } => { self.record_instruction("FCmpF64");
                     let a = regs[*a as usize].as_f64()?;
                     let b = regs[*b as usize].as_f64()?;
                     let r = match pred {
@@ -441,12 +483,12 @@ impl E4Executor {
                     regs[*dst as usize] = E4Value::I32(if r { 1 } else { 0 });
                     pc += 1;
                 }
-                Instruction::I2F64 { dst, a } => {
+                Instruction::I2F64 { dst, a } => { self.record_instruction("I2F64");
                     let a = regs[*a as usize].as_i32()?;
                     regs[*dst as usize] = E4Value::F64(a as f64);
                     pc += 1;
                 }
-                Instruction::F642I { dst, a } => {
+                Instruction::F642I { dst, a } => { self.record_instruction("F642I");
                     let a = regs[*a as usize].as_f64()?;
                     if a.is_nan() || a < (i32::MIN as f64) || a > (i32::MAX as f64) {
                         return Ok(ExecutionResult::fail("E4: f64→i32 conversion error".into(), self.provenance()));
@@ -454,12 +496,12 @@ impl E4Executor {
                     regs[*dst as usize] = E4Value::I32(a as i32);
                     pc += 1;
                 }
-                Instruction::U2F64 { dst, a } => {
+                Instruction::U2F64 { dst, a } => { self.record_instruction("U2F64");
                     let a = regs[*a as usize].as_i32()?;
                     regs[*dst as usize] = E4Value::F64((a as u32) as f64);
                     pc += 1;
                 }
-                Instruction::F642U { dst, a } => {
+                Instruction::F642U { dst, a } => { self.record_instruction("F642U");
                     let a = regs[*a as usize].as_f64()?;
                     if a.is_nan() || a < 0.0 || a > (u32::MAX as f64) {
                         return Ok(ExecutionResult::fail("E4: f64→u32 conversion error".into(), self.provenance()));
@@ -467,11 +509,11 @@ impl E4Executor {
                     regs[*dst as usize] = E4Value::I32((a as u32) as i32);
                     pc += 1;
                 }
-                Instruction::FImmF64 { dst, imm } => {
+                Instruction::FImmF64 { dst, imm } => { self.record_instruction("FImmF64");
                     regs[*dst as usize] = E4Value::F64(*imm);
                     pc += 1;
                 }
-                Instruction::HostCall { id, args, results } => {
+                Instruction::HostCall { id, args, results } => { self.record_instruction("HostCall");
                     // Read arguments from registers
                     let arg_vals: Vec<E4Value> = args
                         .iter()
@@ -1141,6 +1183,49 @@ mod tests {
         let r2 = exec.execute(&m1, 0).unwrap();
         assert_eq!(r1.status, r2.status);
         assert_eq!(r1.value, r2.value);
+    }
+
+    #[test]
+    fn test_e4_profiling_histogram() {
+        // Profiling: instruction histogram tracks execution counts
+        let mut exec = E4Executor::default();
+        exec.start_profiling();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 2.0 },
+            Instruction::FImm { dst: 1, imm: 3.0 },
+            Instruction::FAdd { dst: 2, a: 0, b: 1 }, // FAdd
+            Instruction::FAdd { dst: 2, a: 2, b: 1 }, // FAdd
+            Instruction::FAdd { dst: 2, a: 2, b: 1 }, // FAdd
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        // 2x FImm, 3x FAdd, 1x Ret = 6 total
+        assert_eq!(exec.total_instructions(), 6);
+        // Histogram counts
+        assert_eq!(exec.histogram().get("FImm"), Some(&2));
+        assert_eq!(exec.histogram().get("FAdd"), Some(&3));
+        assert_eq!(exec.histogram().get("Ret"), Some(&1));
+        // Trace matches histogram
+        assert_eq!(exec.trace().len(), 6);
+    }
+
+    #[test]
+    fn test_e4_profiling_trace() {
+        // Profiling: execution trace records instruction names in order
+        let mut exec = E4Executor::default();
+        exec.start_profiling();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+            Instruction::IAdd { dst: 1, a: 0, b: 0 }, // r1 = 2
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 2);
+        assert_eq!(exec.trace(), &["Cmp", "IAdd", "Ret"]);
     }
 
     #[test]
