@@ -2,8 +2,9 @@
 //!
 //! Usage:
 //!   unico run <module-file> [--profile e3|e4|u30] [--fuel N] [--verbose]
-//!   unico encode <source-json> [--profile u30] [--output <file>]
-//!   unico decode <module-file> [--profile u30] [--output <file>]
+//!   unico debug <module-file> [--fuel N]
+//!   unico encode <source-json> [--output <file>]
+//!   unico decode <module-file> [--output <file>]
 //!   unico info <module-file>
 
 use clap::{Parser, Subcommand};
@@ -13,11 +14,13 @@ mod run_cmd;
 mod info_cmd;
 mod encode_cmd;
 mod decode_cmd;
+mod debug_cmd;
 
 pub use run_cmd::run_module;
 pub use info_cmd::info_module;
 pub use encode_cmd::encode_module;
 pub use decode_cmd::decode_module;
+pub use debug_cmd::debug_module;
 
 #[derive(Parser)]
 #[command(name = "unico")]
@@ -51,6 +54,16 @@ enum Commands {
         /// Hex-encoded input arguments (for E3/E4, e.g. "0a 00 2a")
         #[arg(short, long)]
         args: Option<String>,
+    },
+    /// Interactive debugger for U30 modules
+    Debug {
+        /// Module file path (U30 binary)
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Fuel limit (default: 1,000,000)
+        #[arg(short, long, default_value = "1000000")]
+        fuel: u64,
     },
     /// Show module information (functions, memory size, regions)
     Info {
@@ -92,6 +105,9 @@ fn main() {
     let result = match cli.command {
         Commands::Run { file, profile, fuel, args } => {
             run_module(&file, &profile, fuel, args.as_deref(), verbose)
+        }
+        Commands::Debug { file, fuel } => {
+            debug_module(&file, fuel, verbose)
         }
         Commands::Info { file, profile } => {
             info_module(&file, &profile, verbose)

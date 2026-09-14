@@ -13,9 +13,11 @@ pub mod ir;
 pub mod types;
 pub mod runtime;
 pub mod ser;
+pub mod debugger;
 
 pub use error::{Error, Result};
 pub use exec::{E0Executor, E0Module, E1Executor, E1Module, E2Executor, E2Module, E3Executor, E3Module};
 pub use ser::{encode, decode};
 pub use ir::U30Module;
+pub use debugger::{U30Debugger, U30DebugState, U30DebugEvent, Breakpoint};
 pub use types::{I64, Profile, Status, Provenance};
