@@ -21,9 +21,52 @@ use std::io::{Read, Write};
 const MAGIC: &[u8] = b"E4XX";
 const VERSION: u8 = 1;
 
+/// Estimate encoded binary size of an E4Module for pre-allocation.
+pub fn encoded_size(module: &E4Module) -> usize {
+    let mut size = 0;
+    // Header: magic (4) + version (1)
+    size += 5;
+    // Memory: size u32 + bytes
+    size += 4 + module.memory.len();
+    // Functions count
+    size += 4;
+    for f in &module.functions {
+        size += instruction_size_fn(f);
+    }
+    size
+}
+
+fn instruction_size_fn(f: &E4FunctionDef) -> usize {
+    let mut size = 0;
+    size += 4 + 4 + 4 + 4; // param_count + result_count + register_count + code_len
+    for instr in &f.code {
+        size += instruction_size(instr);
+    }
+    size
+}
+
+fn instruction_size(instr: &Instruction) -> usize {
+    match instr {
+        Instruction::Trap => 1,
+        Instruction::Br { .. } | Instruction::Ret { .. } => 5,
+        Instruction::BrIf { .. } | Instruction::LoadI64 { .. } | Instruction::StoreI64 { .. }
+        | Instruction::FSqrt { .. } | Instruction::FNeg { .. } | Instruction::FAbs { .. }
+        | Instruction::FRound { .. } | Instruction::I2F { .. } | Instruction::F2I { .. }
+        | Instruction::U2F { .. } | Instruction::F2U { .. } | Instruction::Mov { .. } => 9,
+        Instruction::FAdd { .. } | Instruction::FSub { .. } | Instruction::FMul { .. }
+        | Instruction::FDiv { .. } => 13,
+        Instruction::Cmp { .. } | Instruction::FCmp { .. } => 14,
+        Instruction::FImm { .. } => 9,
+        Instruction::HostCall { args, results, .. } => {
+            13 + (args.len() + results.len()) * 4
+        }
+    }
+}
+
 /// Encode an E4Module to binary format.
 pub fn encode_e4(module: &E4Module) -> Vec<u8> {
-    let mut buf = Vec::new();
+    let capacity = encoded_size(module);
+    let mut buf = Vec::with_capacity(capacity);
 
     // Header
     buf.write_all(MAGIC).unwrap();
@@ -758,5 +801,28 @@ mod tests {
         let result = exec.execute(&decoded, 0).unwrap();
         assert_eq!(result.status, crate::types::Status::Pass);
         assert_eq!(result.value.unwrap(), 0x41200000_i64); // 10.0 bits
+    }
+
+    #[test]
+    fn test_encoded_size_estimate() {
+        // encoded_size should be >= actual encoded size
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: 1.5 },
+                    Instruction::FImm { dst: 1, imm: 2.5 },
+                    Instruction::FAdd { dst: 2, a: 0, b: 1 },
+                    Instruction::Mov { dst: 0, src: 2 },
+                    Instruction::Ret { dst: 0 },
+                ],
+            }],
+            memory: vec![0u8; 256],
+        };
+        let encoded = encode_e4(&module);
+        let estimate = encoded_size(&module);
+        assert!(estimate >= encoded.len(), "estimate {} >= actual {}", estimate, encoded.len());
     }
 }
