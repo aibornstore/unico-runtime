@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use unico_runtime::{E2Module, E2Executor};
+use unico_runtime::{E2Module, E2Executor, exec::e3::{E3Module, E3Executor, Instruction, build_e3}};
 
 /// Build a Python-compatible E2 module with the given code bytes.
 /// Python format: FUNC section = [func_count, param_count, result_count, register_count,
@@ -126,11 +126,101 @@ fn bench_e2_executor_only(c: &mut Criterion) {
     });
 }
 
+// E3 benchmarks
+fn bench_e3_add(c: &mut Criterion) {
+    let bytes = build_e3(&[
+        Instruction::KImm { dst: 0, value: 10 },
+        Instruction::KImm { dst: 1, value: 32 },
+        Instruction::Add { dst: 0, a: 0, b: 1 }, // r0 = 10 + 32
+        Instruction::Ret,
+    ]);
+    let module = E3Module::parse(&bytes).expect("parse");
+    c.bench_function("e3_add", |b| {
+        b.iter(|| {
+            let mut e = E3Executor::new();
+            let r = e.execute(black_box(&module));
+            black_box(r)
+        });
+    });
+}
+
+fn bench_e3_parser(c: &mut Criterion) {
+    let bytes = build_e3(&[
+        Instruction::KImm { dst: 0, value: 42 },
+        Instruction::Ret,
+    ]);
+    let bytes = black_box(bytes);
+    c.bench_function("e3_parse_only", |b| {
+        b.iter(|| E3Module::parse(&bytes));
+    });
+}
+
+fn bench_e3_store_load(c: &mut Criterion) {
+    let bytes = build_e3(&[
+        Instruction::KImm { dst: 0, value: 0 },      // addr = 0
+        Instruction::KImm { dst: 1, value: 999 },     // value = 999
+        Instruction::StoreI64 { addr: 0, src: 1 },    // mem[0] = 999
+        Instruction::LoadI64 { dst: 2, addr: 0 },     // r2 = mem[0]
+        Instruction::Ret,
+    ]);
+    let module = E3Module::parse(&bytes).expect("parse");
+    c.bench_function("e3_store_load", |b| {
+        b.iter(|| {
+            let mut e = E3Executor::new();
+            let r = e.execute(black_box(&module));
+            black_box(r)
+        });
+    });
+}
+
+fn bench_e3_repeated_arith(c: &mut Criterion) {
+    // 100 add operations
+    let mut instrs = vec![
+        Instruction::KImm { dst: 0, value: 1 },
+        Instruction::KImm { dst: 1, value: 2 },
+    ];
+    for _ in 0..100 {
+        instrs.push(Instruction::Add { dst: 0, a: 0, b: 1 }); // r0 += r1
+    }
+    instrs.push(Instruction::Ret);
+    let bytes = build_e3(&instrs);
+    let module = E3Module::parse(&bytes).expect("parse");
+    c.bench_function("e3_arith_100x", |b| {
+        b.iter(|| {
+            let mut e = E3Executor::new();
+            let r = e.execute(black_box(&module));
+            black_box(r)
+        });
+    });
+}
+
+fn bench_e3_div(c: &mut Criterion) {
+    let bytes = build_e3(&[
+        Instruction::KImm { dst: 0, value: 100 },
+        Instruction::KImm { dst: 1, value: 7 },
+        Instruction::DivI64 { dst: 2, a: 0, b: 1 }, // r2 = 100 / 7 = 14
+        Instruction::Ret,
+    ]);
+    let module = E3Module::parse(&bytes).expect("parse");
+    c.bench_function("e3_div", |b| {
+        b.iter(|| {
+            let mut e = E3Executor::new();
+            let r = e.execute(black_box(&module));
+            black_box(r)
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_e2_mem42,
     bench_e2_repeated,
     bench_e2_parser,
     bench_e2_executor_only,
+    bench_e3_add,
+    bench_e3_parser,
+    bench_e3_store_load,
+    bench_e3_repeated_arith,
+    bench_e3_div,
 );
 criterion_main!(benches);
