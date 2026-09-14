@@ -900,4 +900,135 @@ mod tests {
             panic!("expected FImmF64");
         }
     }
+
+    #[test]
+    fn test_e4_roundtrip_all_instruction_types() {
+        // Property: encode -> decode preserves all instruction types
+        let all_instructions = vec![
+            Instruction::Trap,
+            Instruction::Ret { dst: 0 },
+            Instruction::Br { target: 1 },
+            Instruction::BrIf { cond: 0, target: 2 },
+            Instruction::Mov { dst: 1, src: 0 },
+            Instruction::Cmp { pred: 0, dst: 6, a: 0, b: 1 },
+            Instruction::LoadI64 { dst: 2, addr: 0 },
+            Instruction::StoreI64 { addr: 0, src: 1 },
+            Instruction::FImm { dst: 0, imm: 1.5 },
+            Instruction::FAdd { dst: 1, a: 0, b: 1 },
+            Instruction::FSub { dst: 2, a: 0, b: 1 },
+            Instruction::FMul { dst: 3, a: 0, b: 1 },
+            Instruction::FDiv { dst: 4, a: 0, b: 1 },
+            Instruction::FSqrt { dst: 5, a: 0 },
+            Instruction::FNeg { dst: 6, a: 0 },
+            Instruction::FAbs { dst: 7, a: 0 },
+            Instruction::FRound { dst: 0, a: 1 },
+            Instruction::FCmp { pred: 0, dst: 10, a: 0, b: 1 },
+            Instruction::I2F { dst: 2, a: 0 },
+            Instruction::F2I { dst: 3, a: 0 },
+            Instruction::U2F { dst: 4, a: 0 },
+            Instruction::F2U { dst: 5, a: 0 },
+            Instruction::FImmF64 { dst: 0, imm: 2.71828 },
+            Instruction::FAddF64 { dst: 1, a: 0, b: 1 },
+            Instruction::FMulF64 { dst: 2, a: 0, b: 1 },
+            Instruction::FDivF64 { dst: 3, a: 0, b: 1 },
+            Instruction::FSqrtF64 { dst: 4, a: 0 },
+            Instruction::FNegF64 { dst: 5, a: 0 },
+            Instruction::FAbsF64 { dst: 6, a: 0 },
+            Instruction::FRoundF64 { dst: 7, a: 0 },
+            Instruction::FCmpF64 { pred: 1, dst: 0, a: 1, b: 2 },
+            Instruction::I2F64 { dst: 1, a: 0 },
+            Instruction::F642I { dst: 2, a: 0 },
+            Instruction::U2F64 { dst: 3, a: 0 },
+            Instruction::F642U { dst: 4, a: 0 },
+            Instruction::HostCall { id: 0, args: vec![0, 1], results: vec![2] },
+        ];
+        for instr in all_instructions {
+            let module = E4Module {
+                functions: vec![E4FunctionDef {
+                    param_count: 0,
+                    result_count: 0,
+                    register_count: 8,
+                    code: vec![instr.clone(), Instruction::Trap],
+                }],
+                memory: vec![0u8; 256],
+            };
+            let encoded = encode_e4(&module);
+            let decoded = decode_e4(&encoded).unwrap();
+            assert_eq!(decoded.functions[0].code[0], instr, "roundtrip failed for {:?}", instr);
+        }
+    }
+
+    #[test]
+    fn test_e4_encode_preserves_module_equality() {
+        // Property: encoding two equal modules produces equal bytes
+        let module1 = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 1,
+                result_count: 2,
+                register_count: 16,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: 3.14 },
+                    Instruction::FImm { dst: 1, imm: 2.71 },
+                    Instruction::FMul { dst: 2, a: 0, b: 1 },
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![0u8; 4096],
+        };
+        let module2 = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 1,
+                result_count: 2,
+                register_count: 16,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: 3.14 },
+                    Instruction::FImm { dst: 1, imm: 2.71 },
+                    Instruction::FMul { dst: 2, a: 0, b: 1 },
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![0u8; 4096],
+        };
+        let bytes1 = encode_e4(&module1);
+        let bytes2 = encode_e4(&module2);
+        assert_eq!(bytes1, bytes2, "equal modules encode to equal bytes");
+    }
+
+    #[test]
+    fn test_e4_encode_different_instructions_different_sizes() {
+        // Property: different instructions encode to different sizes
+        let trap_module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::Trap],
+            }],
+            memory: vec![0u8; 256],
+        };
+        let ret_module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::Ret { dst: 0 }],
+            }],
+            memory: vec![0u8; 256],
+        };
+        let fimm_module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::FImm { dst: 0, imm: 1.0 }],
+            }],
+            memory: vec![0u8; 256],
+        };
+        let bytes_trap = encode_e4(&trap_module);
+        let bytes_ret = encode_e4(&ret_module);
+        let bytes_fimm = encode_e4(&fimm_module);
+        // Trap=1 opcode, Ret=5 bytes, FImm=9 bytes
+        assert_eq!(bytes_trap.len(), bytes_ret.len() - 4, "Trap should be 4 bytes shorter than Ret");
+        assert_eq!(bytes_fimm.len(), bytes_ret.len() + 4, "FImm should be 4 bytes longer than Ret");
+    }
 }

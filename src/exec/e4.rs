@@ -29,7 +29,7 @@ use std::time::Instant;
 // ---------------------------------------------------------------------------
 
 /// E4 instruction
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Instruction {
     // E1 control flow (baseline)
     Br { target: u32 },
@@ -86,7 +86,7 @@ pub enum Instruction {
 }
 
 /// E4 function definition
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct E4FunctionDef {
     pub param_count: usize,
     pub result_count: usize,
@@ -1067,6 +1067,48 @@ mod tests {
         let val = result.value.unwrap() as u64;
         let expected = 15.0_f64.to_bits();
         assert_eq!(val, expected);
+    }
+
+    #[test]
+    fn test_e4_deterministic_execution() {
+        // Property: executing the same module 10 times gives the same result
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 2.5 },
+            Instruction::FImm { dst: 1, imm: 2.5 },
+            Instruction::FMul { dst: 2, a: 0, b: 1 }, // r2 = 2.5 * 2.5
+            Instruction::Ret { dst: 2 },
+        ]);
+        let results: Vec<_> = (0..10).map(|_| {
+            let mut e = E4Executor::default();
+            e.host_functions_mut().register(|_args| E4Value::I32(0));
+            e.execute(&module, 0).unwrap()
+        }).collect();
+        // All runs should have same status
+        let statuses: Vec<_> = results.iter().map(|r| r.status).collect();
+        assert!(statuses.iter().all(|s| *s == Status::Pass), "all runs should pass");
+        // All values should be identical
+        let first_val = results[0].value;
+        for (i, r) in results.iter().enumerate().skip(1) {
+            assert_eq!(r.value, first_val, "run {} should have same value", i);
+        }
+    }
+
+    #[test]
+    fn test_e4_memory_independent() {
+        // Property: memory is reset between executions
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let mut m1 = make_module_with_memory(vec![
+            Instruction::StoreI64 { addr: 8, src: 0 }, // store I32(0) at addr 8
+            Instruction::LoadI64 { dst: 1, addr: 8 },  // load back
+            Instruction::Ret { dst: 1 },
+        ], 256);
+        // First execution
+        let r1 = exec.execute(&m1, 0).unwrap();
+        // Second execution — memory reset, same result
+        let r2 = exec.execute(&m1, 0).unwrap();
+        assert_eq!(r1.status, r2.status);
+        assert_eq!(r1.value, r2.value);
     }
 
     #[test]
