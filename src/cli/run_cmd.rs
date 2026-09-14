@@ -2,9 +2,11 @@
 
 use std::fs;
 use std::path::Path;
-use unico_runtime::exec::e3::{E3Executor, E3Module};
-use unico_runtime::runtime::U30Runtime;
 use unico_runtime::decode;
+use unico_runtime::decode_e4;
+use unico_runtime::exec::e3::{E3Executor, E3Module};
+use unico_runtime::exec::e4::E4Executor;
+use unico_runtime::runtime::U30Runtime;
 
 pub fn run_module(
     file: &Path,
@@ -26,7 +28,8 @@ pub fn run_module(
     match prof.as_str() {
         "e3" => run_e3(&data, verbose),
         "u30" => run_u30(&data, fuel, verbose),
-        _ => anyhow::bail!("profile '{}' run not supported in CLI (E4 requires JSON input)", prof),
+        "e4" => run_e4(&data, verbose),
+        _ => anyhow::bail!("profile '{}' run not supported in CLI", prof),
     }
 }
 
@@ -64,6 +67,30 @@ fn run_e3(data: &[u8], verbose: bool) -> anyhow::Result<()> {
     if verbose {
         println!(
             "Provenance: instructions=?, duration={:.3}ms",
+            result.provenance.duration_us as f64 / 1_000.0
+        );
+    }
+    Ok(())
+}
+
+fn run_e4(data: &[u8], verbose: bool) -> anyhow::Result<()> {
+    let module = decode_e4(data).map_err(|e| anyhow::anyhow!("decode error: {e}"))?;
+    let mut exec = E4Executor::default();
+    let result = exec
+        .execute(&module, 0)
+        .map_err(|e| anyhow::anyhow!("execute error: {e}"))?;
+
+    println!("Status: {:?}", result.status);
+    if let Some(v) = result.value {
+        println!("Result: {}", v);
+    }
+    if let Some(err) = &result.error {
+        println!("Error: {}", err);
+    }
+    if verbose {
+        println!(
+            "Host calls: {}, duration={:.3}ms",
+            result.provenance.host_calls,
             result.provenance.duration_us as f64 / 1_000.0
         );
     }

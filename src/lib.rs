@@ -4,20 +4,22 @@
 //! 
 //! Based on UNICO v3.0 Execution Contract
 
+pub mod debugger;
+pub mod e4_ser;
 pub mod error;
 pub mod exec;
-pub mod leb128;
-pub mod verify;
 pub mod host;
 pub mod ir;
-pub mod types;
+pub mod leb128;
 pub mod runtime;
 pub mod ser;
-pub mod debugger;
+pub mod types;
+pub mod verify;
 
+pub use e4_ser::{decode_e4, encode_e4};
 pub use error::{Error, Result};
 pub use exec::{E0Executor, E0Module, E1Executor, E1Module, E2Executor, E2Module, E3Executor, E3Module};
-pub use ser::{encode, decode};
+pub use ser::{decode, encode};
+pub use debugger::{Breakpoint, U30DebugEvent, U30DebugState, U30Debugger};
 pub use ir::U30Module;
-pub use debugger::{U30Debugger, U30DebugState, U30DebugEvent, Breakpoint};
-pub use types::{I64, Profile, Status, Provenance};
+pub use types::{I64, Profile, Provenance, Status};
