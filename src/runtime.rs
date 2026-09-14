@@ -2531,9 +2531,9 @@ mod tests {
                 ops: vec![
                     U30Op::Const { dst: 1, value: U30Value::U64(1) },
                     U30Op::Binary { dst: 2, op: U30BinaryOp::AddWrapU64, a: 0, b: 1 }, // r2 = x + 1
-                    U30Op::Const { dst: 3, value: U30Value::U64(0) }, // fn_idx = double
+                    U30Op::Const { dst: 3, value: U30Value::U64(0) }, // r3 = double index
                 ],
-                // Tail-call: jump to double(x+1), replacing helper's frame
+                // Tail-call: function index in r3, arg in r2
                 // double's return value goes directly to main's caller
                 terminator: U30Terminator::TailCall { function: 3, args: vec![2] },
             }],
@@ -3641,6 +3641,160 @@ mod tests {
             .execute_experimental(&module, &[])
             .expect_err("load u32 OOB");
         assert!(err.to_string().contains("out of bounds") || err.to_string().contains("OOB"), "expected OOB: {}", err);
+    }
+
+    // ─── U30 Verifier tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn u30_verify_call_bad_fn_index() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Call { function: 99, args: vec![], results: vec![] },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = module.verify_experimental().expect_err("should fail");
+        assert!(err.to_string().contains("undefined function index 99"), "got: {err}");
+    }
+
+    #[test]
+    fn u30_verify_call_bad_arg_count() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![U30Type::U64, U30Type::U64],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            // Call fn0 which expects 2 args, but pass only 1
+                            U30Op::Call { function: 0, args: vec![0], results: vec![] },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 1,
+        };
+        let err = module.verify_experimental().expect_err("should fail");
+        assert!(err.to_string().contains("expects 2 args, got 1"), "got: {err}");
+    }
+
+    #[test]
+    fn u30_verify_table_bad_target() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![0, 99] }, // block 99 doesn't exist
+            ],
+            functions: vec![U30Function {
+                params: vec![U30Type::U64],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::TableBr { table: 0, index: 0 }, // r0 = index param
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = module.verify_experimental().expect_err("should fail");
+        assert!(err.to_string().contains("invalid target block 99"), "got: {err}");
+    }
+
+    #[test]
+    fn u30_verify_undefined_operand() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        // r0 is used but never defined
+                        U30Op::Binary { dst: 1, op: U30BinaryOp::AddWrapU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = module.verify_experimental().expect_err("should fail");
+        assert!(err.to_string().contains("undefined source value %0"), "got: {err}");
+    }
+
+    #[test]
+    fn u30_verify_region_unknown() {
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::LoadU64 { dst: 3, region: 99, offset: 0 }, // region 99 doesn't exist
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = module.verify_experimental().expect_err("should fail");
+        assert!(err.to_string().contains("unknown region 99"), "got: {err}");
+    }
+
+    #[test]
+    fn u30_verify_valid_module() {
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![1, 2, 3, 4] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U64],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 1, value: U30Value::U64(2) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::MulWrapU64, a: 0, b: 1 }, // r2 = x * 2
+                        U30Op::LoadU64 { dst: 3, region: 0, offset: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        module.verify_experimental().expect("valid module should pass");
     }
 
 }
