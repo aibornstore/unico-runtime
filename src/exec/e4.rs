@@ -98,6 +98,8 @@ pub enum Instruction {
     // E4 host boundary v2: call a host function
     // id = host function index, args = register indices, results = register indices
     HostCall { id: u32, args: Vec<u32>, results: Vec<u32> },
+    /// Indirect jump via jump table: jump to tables[table_idx][index]
+    TableBr { table_idx: u32, index: u32 },
 }
 
 /// E4 function definition
@@ -114,6 +116,8 @@ pub struct E4FunctionDef {
 pub struct E4Module {
     pub functions: Vec<E4FunctionDef>,
     pub memory: Vec<u8>, // 4096 bytes
+    /// Jump tables for indirect jumps: tables[table_idx][index] = target_pc
+    pub tables: Vec<Vec<u32>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -596,6 +600,16 @@ impl E4Executor {
                     }
                     pc += 1;
                 }
+                Instruction::TableBr { table_idx, index } => {
+                    self.record_instruction("TableBr");
+                    let idx = regs[*index as usize].as_i32()?;
+                    let idx = idx.max(0) as usize;
+                    let table = module.tables.get(*table_idx as usize)
+                        .ok_or_else(|| Error::Generic("E4: invalid table index".into()))?;
+                    let &target = table.get(idx)
+                        .ok_or_else(|| Error::Generic("E4: table index out of bounds".into()))?;
+                    pc = target as usize;
+                }
             }
         }
     }
@@ -619,6 +633,7 @@ mod tests {
                 code,
             }],
             memory: vec![0u8; 4096],
+            tables: vec![],
         }
     }
 
@@ -631,6 +646,7 @@ mod tests {
                 code,
             }],
             memory: vec![0u8; memory_size],
+            tables: vec![],
         }
     }
 
@@ -904,6 +920,7 @@ mod tests {
         let module = E4Module {
             functions: vec![],
             memory: vec![0u8; 4096],
+            tables: vec![],
         };
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.status, Status::Fail);
@@ -1163,6 +1180,7 @@ mod tests {
                 code: vec![],
             }],
             memory: vec![0u8; 256],
+            tables: vec![],
         };
         let mut exec = E4Executor::default();
         let result = exec.execute(&module, 0).unwrap();

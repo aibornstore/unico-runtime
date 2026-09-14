@@ -449,6 +449,13 @@ fn fmt_instruction(out: &mut Out, instr: &Instruction, pc: usize) {
                 out.plain("]");
             }
         }
+        Instruction::TableBr { table_idx, index } => {
+            out.op("table.br");
+            out.plain(" ");
+            out.value(&format!("table={}", table_idx));
+            out.plain(" ");
+            out.reg(&format!("r{}", index));
+        }
     }
     out.writeln("");
 }
@@ -478,6 +485,7 @@ mod tests {
                 ],
             }],
             memory: vec![],
+            tables: vec![],
         };
         let encoded = encode_e4(&module);
         let text = decode_disasm(&encoded).unwrap();
@@ -497,6 +505,7 @@ mod tests {
                 code: vec![Instruction::Ret { dst: 0 }],
             }],
             memory: vec![],
+            tables: vec![],
         };
         let encoded = encode_e4(&module);
         let text = decode_disasm_opts(
@@ -522,6 +531,7 @@ mod tests {
                 ],
             }],
             memory: vec![],
+            tables: vec![],
         };
         let encoded = encode_e4(&module);
         let text = decode_disasm(&encoded).unwrap();
@@ -544,6 +554,7 @@ mod tests {
                 ],
             }],
             memory: vec![],
+            tables: vec![],
         };
         let encoded = encode_e4(&module);
         let text = decode_disasm(&encoded).unwrap();
@@ -556,6 +567,7 @@ mod tests {
         let module = E4Module {
             functions: vec![],
             memory: vec![0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE],
+            tables: vec![],
         };
         let encoded = encode_e4(&module);
         let text = decode_disasm_opts(
@@ -602,11 +614,13 @@ mod tests {
                     Instruction::Mov { dst: 15, src: 0 },
                     Instruction::FImm { dst: 0, imm: 3.14 },
                     Instruction::HostCall { id: 0, args: vec![0], results: vec![1] },
+                    Instruction::TableBr { table_idx: 0, index: 0 },
                     Instruction::Trap,
                     Instruction::Ret { dst: 0 },
                 ],
             }],
             memory: vec![],
+            tables: vec![vec![3, 4]], // table 0: index 0 → pc 3, index 1 → pc 4
         };
         let encoded = encode_e4(&module);
         let text = decode_disasm(&encoded).unwrap();
@@ -633,6 +647,7 @@ mod tests {
         assert!(text.contains("host.call"));
         assert!(text.contains("trap"));
         assert!(text.contains("ret "));
+        assert!(text.contains("table.br"), "missing table.br");
     }
 
     #[test]
@@ -657,6 +672,7 @@ mod tests {
                 },
             ],
             memory: vec![],
+            tables: vec![],
         };
         let encoded = encode_e4(&module);
         let text = decode_disasm(&encoded).unwrap();
@@ -686,6 +702,7 @@ mod tests {
                 ],
             }],
             memory: vec![],
+            tables: vec![],
         };
         let text = fmt_module_opts(&module, FmtOpts::default());
         assert!(text.contains("fimm.f64"), "missing fimm.f64");
@@ -714,6 +731,7 @@ mod tests {
                 ],
             }],
             memory: vec![],
+            tables: vec![],
         };
         let text = fmt_module_opts(&module, FmtOpts::default());
         assert!(text.contains("iadd"), "missing iadd");

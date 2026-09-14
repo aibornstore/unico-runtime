@@ -65,7 +65,7 @@ fn instruction_size(instr: &Instruction) -> usize {
         | Instruction::IAnd { .. } | Instruction::IOr { .. } | Instruction::IXor { .. }
         | Instruction::IRotl { .. } | Instruction::IRotr { .. } => 13,
         Instruction::INot { .. } | Instruction::IClz { .. } | Instruction::ICtz { .. }
-        | Instruction::IPopcnt { .. } => 9,
+        | Instruction::IPopcnt { .. } | Instruction::TableBr { .. } => 9,
         Instruction::Cmp { .. } | Instruction::FCmp { .. } | Instruction::FCmpF64 { .. } => 14,
         Instruction::FImm { .. } | Instruction::FImmF64 { .. } => 9,
         Instruction::HostCall { args, results, .. } => {
@@ -261,6 +261,7 @@ fn encode_instruction(buf: &mut Vec<u8>, instr: &Instruction) {
                 write_u32(buf, r);
             }
         }
+        Instruction::TableBr { table_idx, index } => { buf.push(0x32); write_u32(buf, *table_idx); write_u32(buf, *index); }
     }
 }
 
@@ -309,7 +310,7 @@ pub fn decode_e4(buf: &[u8]) -> Result<E4Module> {
         functions.push(decode_function_from_cursor(&mut cursor)?);
     }
 
-    Ok(E4Module { functions, memory })
+    Ok(E4Module { functions, memory, tables: vec![] })
 }
 
 fn decode_function_from_cursor<R: Read>(cursor: &mut R) -> Result<E4FunctionDef> {
@@ -603,6 +604,7 @@ fn decode_instruction_from_cursor<R: Read>(cursor: &mut R) -> Result<Instruction
         0x2F => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IPopcnt { dst, a }) }
         0x30 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IRotl { dst, a, b }) }
         0x31 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IRotr { dst, a, b }) }
+        0x32 => { let table_idx = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let index = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::TableBr { table_idx, index }) }
         _ => Err(Error::Generic(format!("E4: unknown opcode {:#04x}", opcode))),
     }
 }
@@ -637,6 +639,7 @@ mod tests {
                 ],
             }],
             memory: vec![0u8; 256],
+            tables: vec![],
         };
         let decoded = roundtrip(&module);
         assert_eq!(decoded.functions.len(), 1);
@@ -673,6 +676,7 @@ mod tests {
                 ],
             }],
             memory: vec![0u8; 64],
+            tables: vec![],
         };
         let decoded = roundtrip(&module);
         let mut exec = E4Executor::default();
@@ -696,6 +700,7 @@ mod tests {
                 ],
             }],
             memory: vec![0u8; 64],
+            tables: vec![],
         };
         let decoded = roundtrip(&module);
         let result = exec.execute(&decoded, 0).unwrap();
@@ -755,6 +760,7 @@ mod tests {
                 },
             ],
             memory: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            tables: vec![],
         };
         let decoded = roundtrip(&module);
         assert_eq!(decoded.functions.len(), 2);
@@ -781,6 +787,7 @@ mod tests {
                 ],
             }],
             memory: vec![],
+            tables: vec![],
         };
         let decoded = roundtrip(&module);
         assert!(decoded.memory.is_empty());
@@ -800,6 +807,7 @@ mod tests {
                 ],
             }],
             memory: vec![0u8; 64],
+            tables: vec![],
         };
         let decoded = roundtrip(&module);
         let mut exec = E4Executor::default();
@@ -825,6 +833,7 @@ mod tests {
                 ],
             }],
             memory: vec![0u8; 64],
+            tables: vec![],
         };
         let decoded = roundtrip(&module);
         let mut exec = E4Executor::default();
@@ -862,6 +871,7 @@ mod tests {
                 ],
             }],
             memory: vec![0u8; 64],
+            tables: vec![],
         };
         let decoded = roundtrip(&module);
         let result = exec.execute(&decoded, 0).unwrap();
@@ -886,6 +896,7 @@ mod tests {
                 ],
             }],
             memory: vec![0u8; 256],
+            tables: vec![],
         };
         let encoded = encode_e4(&module);
         let estimate = encoded_size(&module);
@@ -919,6 +930,7 @@ mod tests {
                 ],
             }],
             memory: vec![0u8; 256],
+            tables: vec![],
         };
         let encoded = encode_e4(&module);
         let decoded = decode_e4(&encoded).unwrap();
@@ -996,6 +1008,7 @@ mod tests {
                     code: vec![instr.clone(), Instruction::Trap],
                 }],
                 memory: vec![0u8; 256],
+                tables: vec![],
             };
             let encoded = encode_e4(&module);
             let decoded = decode_e4(&encoded).unwrap();
@@ -1019,6 +1032,7 @@ mod tests {
                 ],
             }],
             memory: vec![0u8; 4096],
+            tables: vec![],
         };
         let module2 = E4Module {
             functions: vec![E4FunctionDef {
@@ -1033,6 +1047,7 @@ mod tests {
                 ],
             }],
             memory: vec![0u8; 4096],
+            tables: vec![],
         };
         let bytes1 = encode_e4(&module1);
         let bytes2 = encode_e4(&module2);
@@ -1050,6 +1065,7 @@ mod tests {
                 code: vec![Instruction::Trap],
             }],
             memory: vec![0u8; 256],
+            tables: vec![],
         };
         let ret_module = E4Module {
             functions: vec![E4FunctionDef {
@@ -1059,6 +1075,7 @@ mod tests {
                 code: vec![Instruction::Ret { dst: 0 }],
             }],
             memory: vec![0u8; 256],
+            tables: vec![],
         };
         let fimm_module = E4Module {
             functions: vec![E4FunctionDef {
@@ -1068,6 +1085,7 @@ mod tests {
                 code: vec![Instruction::FImm { dst: 0, imm: 1.0 }],
             }],
             memory: vec![0u8; 256],
+            tables: vec![],
         };
         let bytes_trap = encode_e4(&trap_module);
         let bytes_ret = encode_e4(&ret_module);
@@ -1096,6 +1114,7 @@ mod tests {
                 ],
             }],
             memory: vec![0u8; 256],
+            tables: vec![],
         };
         let encoded = encode_e4(&module);
         let decoded = decode_e4(&encoded).unwrap();
