@@ -19,9 +19,9 @@ use crate::exec::e4::{E4FunctionDef, E4Module, E4Value, Instruction};
 // Options
 // ---------------------------------------------------------------------------
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct FmtOpts {
-    /// Use ANSI color codes. Default: true.
+    /// Use ANSI color codes. Default: false.
     pub colors: bool,
     /// Show memory as hex. Default: true.
     pub show_memory: bool,
@@ -32,6 +32,16 @@ pub struct FmtOpts {
 impl FmtOpts {
     pub fn colors(self, yes: bool) -> Self {
         Self { colors: yes, ..self }
+    }
+}
+
+impl Default for FmtOpts {
+    fn default() -> Self {
+        Self {
+            colors: false,
+            show_memory: true,
+            hex_cols: 16,
+        }
     }
 }
 

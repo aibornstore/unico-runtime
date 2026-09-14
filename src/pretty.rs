@@ -1,4 +1,7 @@
-//! U30 Pretty-Printer — human-readable IR dump with ANSI colors
+//! U30 Pretty-Printer — human-readable IR dump
+//!
+//! Default output is plain text (no ANSI color codes).
+//! Enable colors with `FmtOpts { colors: true, .. }`.
 //!
 //! ## Example
 //! ```rust,no_run
@@ -48,7 +51,7 @@ impl FmtOpts {
 impl Default for FmtOpts {
     fn default() -> Self {
         Self {
-            colors: true,
+            colors: false,
             show_region_data: false,
             show_tables: true,
             hex_cols: 32,
@@ -1299,7 +1302,8 @@ mod tests {
     #[test]
     fn test_pretty_colors() {
         let m = sample_module();
-        let text = fmt_module(&m);
+        let opts = FmtOpts { colors: true, show_region_data: false, show_tables: true, hex_cols: 32 };
+        let text = fmt_module_opts(&m, opts);
         assert!(text.contains("\x1b[1m")); // bold for ops
         assert!(text.contains("\x1b[33m")); // yellow for regs
         assert!(text.contains("\x1b[32m")); // green for values
