@@ -3466,4 +3466,181 @@ mod tests {
             .expect_err("load non-readable");
         assert!(err.to_string().contains("not readable"), "expected not readable: {}", err);
     }
+
+    #[test]
+    fn u30x_memcopy_zero_size() {
+        // MemCopy with size=0 is a no-op (should succeed)
+        let mut data = vec![0u8; 16];
+        data[0] = 42;
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: data.clone() },
+                U30RegionDecl { id: 1, size: 16, readable: true, writable: true, initial: vec![0; 16] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U8],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        // MemCopy size=0 — no-op
+                        U30Op::MemCopy { dst_region: 1, dst_offset: 0, src_region: 0, src_offset: 0, size: 0 },
+                        U30Op::LoadU8 { dst: 1, region: 1, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("memcopy zero size");
+        assert_eq!(out.results, vec![U30Value::U8(0)], "dst should be untouched");
+    }
+
+    #[test]
+    fn u30x_memfill_zero_size() {
+        // MemFill with size=0 is a no-op
+        let module = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 8, readable: true, writable: true, initial: vec![0xFF; 8] }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0x00) },
+                        U30Op::Const { dst: 2, value: U30Value::U32(0) }, // size=0
+                        // MemFill size=0 — no-op
+                        U30Op::MemFill { region: 0, offset: 0, value: 1, size: 2 },
+                        U30Op::LoadU64 { dst: 3, region: 0, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("memfill zero size");
+        assert_eq!(out.results, vec![U30Value::U64(0xFFFF_FFFF_FFFF_FFFF)], "data should be unchanged");
+    }
+
+    #[test]
+    fn u30x_memcopy_oob_fails() {
+        // MemCopy with dst_offset + size > region.size returns error
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: vec![1; 16] },
+                U30RegionDecl { id: 1, size: 4, readable: true, writable: true, initial: vec![0; 4] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) }, // dst_offset=0
+                        U30Op::Const { dst: 1, value: U30Value::U32(0) }, // src_offset=0
+                        U30Op::Const { dst: 2, value: U30Value::U32(8) }, // size=8 (exceeds dst region size 4)
+                        U30Op::MemCopy { dst_region: 1, dst_offset: 0, src_region: 0, src_offset: 0, size: 2 }, // size from r2=8
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("memcopy OOB");
+        assert!(err.to_string().contains("out of bounds") || err.to_string().contains("OOB"), "expected OOB: {}", err);
+    }
+
+    #[test]
+    fn u30x_memfill_oob_fails() {
+        // MemFill with offset + size > region.size returns error
+        let module = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 4, readable: true, writable: true, initial: vec![0; 4] }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(2) }, // offset=2
+                        U30Op::Const { dst: 1, value: U30Value::U32(0xAB) },
+                        U30Op::Const { dst: 2, value: U30Value::U32(4) }, // size=4 (offset+size=6 > 4)
+                        U30Op::MemFill { region: 0, offset: 0, value: 1, size: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("memfill OOB");
+        assert!(err.to_string().contains("out of bounds") || err.to_string().contains("OOB"), "expected OOB: {}", err);
+    }
+
+    #[test]
+    fn u30x_memgrow_zero_region() {
+        // MemGrow on a zero-size region works (grows from 0)
+        let module = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 0, readable: true, writable: true, initial: vec![] }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(4096) },
+                        U30Op::MemGrow { dst: 2, region: 0, delta: 1 },
+                        U30Op::MemSize { dst: 3, region: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("memgrow zero region");
+        assert_eq!(out.results, vec![U30Value::U64(4096)], "region grew to 4096");
+    }
+
+    #[test]
+    fn u30x_load_u32_oob_fails() {
+        // LoadU32 with offset >= region.size returns error
+        let module = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 4, readable: true, writable: true, initial: vec![0; 4] }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(4) }, // offset=4 (equal to region size)
+                        U30Op::LoadU32 { dst: 1, region: 0, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("load u32 OOB");
+        assert!(err.to_string().contains("out of bounds") || err.to_string().contains("OOB"), "expected OOB: {}", err);
+    }
+
 }
