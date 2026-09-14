@@ -45,6 +45,16 @@ pub enum Instruction {
     ISub { dst: u32, a: u32, b: u32 },
     IMul { dst: u32, a: u32, b: u32 },
     IDiv { dst: u32, a: u32, b: u32 },
+    // E4 bitwise operations (i32)
+    IAnd { dst: u32, a: u32, b: u32 },
+    IOr { dst: u32, a: u32, b: u32 },
+    IXor { dst: u32, a: u32, b: u32 },
+    INot { dst: u32, a: u32 },
+    IClz { dst: u32, a: u32 },
+    ICtz { dst: u32, a: u32 },
+    IPopcnt { dst: u32, a: u32 },
+    IRotl { dst: u32, a: u32, b: u32 },
+    IRotr { dst: u32, a: u32, b: u32 },
     // E4 floating-point binary (f32)
     FAdd { dst: u32, a: u32, b: u32 },
     FSub { dst: u32, a: u32, b: u32 },
@@ -325,6 +335,58 @@ impl E4Executor {
                         return Ok(ExecutionResult::fail("E4: division by zero".into(), self.provenance()));
                     }
                     regs[*dst as usize] = E4Value::I32(a.wrapping_div(b));
+                    pc += 1;
+                }
+                Instruction::IAnd { dst, a, b } => { self.record_instruction("IAnd");
+                    let a = regs[*a as usize].as_i32()?;
+                    let b = regs[*b as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(a & b);
+                    pc += 1;
+                }
+                Instruction::IOr { dst, a, b } => { self.record_instruction("IOr");
+                    let a = regs[*a as usize].as_i32()?;
+                    let b = regs[*b as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(a | b);
+                    pc += 1;
+                }
+                Instruction::IXor { dst, a, b } => { self.record_instruction("IXor");
+                    let a = regs[*a as usize].as_i32()?;
+                    let b = regs[*b as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(a ^ b);
+                    pc += 1;
+                }
+                Instruction::INot { dst, a } => { self.record_instruction("INot");
+                    let a = regs[*a as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(!a);
+                    pc += 1;
+                }
+                Instruction::IClz { dst, a } => { self.record_instruction("IClz");
+                    let a = regs[*a as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(a.leading_zeros() as i32);
+                    pc += 1;
+                }
+                Instruction::ICtz { dst, a } => { self.record_instruction("ICtz");
+                    let a = regs[*a as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(a.trailing_zeros() as i32);
+                    pc += 1;
+                }
+                Instruction::IPopcnt { dst, a } => { self.record_instruction("IPopcnt");
+                    let a = regs[*a as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(a.count_ones() as i32);
+                    pc += 1;
+                }
+                Instruction::IRotl { dst, a, b } => { self.record_instruction("IRotl");
+                    let a = regs[*a as usize].as_i32()?;
+                    let b = regs[*b as usize].as_i32()?;
+                    let shift = (b as u32) & 31;
+                    regs[*dst as usize] = E4Value::I32(a.rotate_left(shift));
+                    pc += 1;
+                }
+                Instruction::IRotr { dst, a, b } => { self.record_instruction("IRotr");
+                    let a = regs[*a as usize].as_i32()?;
+                    let b = regs[*b as usize].as_i32()?;
+                    let shift = (b as u32) & 31;
+                    regs[*dst as usize] = E4Value::I32(a.rotate_right(shift));
                     pc += 1;
                 }
                 Instruction::FAdd { dst, a, b } => { self.record_instruction("FAdd");
@@ -1340,5 +1402,120 @@ mod tests {
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.status, Status::Fail);
         assert!(result.error.unwrap().contains("division by zero"));
+    }
+
+    #[test]
+    fn test_e4_and_or_xor() {
+        // IAnd, IOr: r0=8, r1=256 → IAnd=0, IOr=264
+        // Use HostCall to set r0=8 and r1=256 directly
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(8));
+        let module = make_module(vec![
+            Instruction::HostCall { id: 0, args: vec![], results: vec![0] }, // r0 = 8
+            Instruction::HostCall { id: 0, args: vec![], results: vec![1] }, // r1 = 8
+            Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 16
+            Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 32
+            Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 64
+            Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 128
+            Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 256
+            // r0 = 8, r1 = 256 → IOr = 264
+            Instruction::IAnd { dst: 2, a: 0, b: 1 }, // r2 = 0
+            Instruction::IOr { dst: 3, a: 0, b: 1 }, // r3 = 264
+            Instruction::Ret { dst: 3 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 264);
+    }
+
+    #[test]
+    fn test_e4_inot_popcnt() {
+        // IPopcnt(0b1000) = 1
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+            Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 2
+            Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 4
+            Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 8
+            Instruction::IPopcnt { dst: 1, a: 0 }, // r1 = popcnt(8) = 1
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 1);
+    }
+
+    #[test]
+    fn test_e4_iclz_ictz() {
+        // IClz: leading zeros in 0b0001 = 31, ICtz: trailing zeros = 0
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+            Instruction::IClz { dst: 1, a: 0 }, // r1 = clz(1) = 31
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 31);
+    }
+
+    #[test]
+    fn test_e4_ixor() {
+        // IXor: 12 ^ 10 = 6 (0b1100 ^ 0b1010 = 0b0110)
+        // Use HostCall to return 12 for r0 and 10 for r1 via two calls to same fn
+        // but pass different args to distinguish
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|args| {
+            if args.is_empty() { E4Value::I32(12) } else { E4Value::I32(10) }
+        });
+        let module = make_module(vec![
+            Instruction::HostCall { id: 0, args: vec![], results: vec![0] }, // r0 = 12
+            Instruction::HostCall { id: 0, args: vec![0], results: vec![1] }, // r1 = 10
+            Instruction::IXor { dst: 2, a: 0, b: 1 }, // r2 = 12 ^ 10 = 6
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 6);
+    }
+
+    #[test]
+    fn test_e4_rotate() {
+        // IRotl: rotate left 4 by 1 bit = 8
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+            Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 2
+            Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 4
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // r1 = 1 (r0=4 > 0)
+            Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 2
+            Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 4
+            Instruction::Cmp { pred: 0, dst: 2, a: 0, b: 0 }, // r2 = 1 (rot amount)
+            Instruction::IRotl { dst: 3, a: 1, b: 2 }, // r3 = rotl(4, 1) = 8
+            Instruction::Ret { dst: 3 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 8);
+    }
+
+    #[test]
+    fn test_e4_irotr() {
+        // IRotr: rotate right 1 by 31 bits = 0x80000000 (i32::MIN)
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1 (0==0)
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // r1 = 1 (1==1)
+            Instruction::Cmp { pred: 0, dst: 2, a: 0, b: 0 }, // r2 = 1 (1==1)
+            Instruction::IRotr { dst: 3, a: 1, b: 2 }, // r3 = rotr(1, 31) = 0x80000000
+            Instruction::Ret { dst: 3 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), i32::MIN as i64); // 0x80000000
     }
 }

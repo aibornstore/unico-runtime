@@ -61,7 +61,11 @@ fn instruction_size(instr: &Instruction) -> usize {
         | Instruction::FAddF64 { .. } | Instruction::FSubF64 { .. } | Instruction::FMulF64 { .. }
         | Instruction::FDivF64 { .. }
         | Instruction::IAdd { .. } | Instruction::ISub { .. } | Instruction::IMul { .. }
-        | Instruction::IDiv { .. } => 13,
+        | Instruction::IDiv { .. }
+        | Instruction::IAnd { .. } | Instruction::IOr { .. } | Instruction::IXor { .. }
+        | Instruction::IRotl { .. } | Instruction::IRotr { .. } => 13,
+        Instruction::INot { .. } | Instruction::IClz { .. } | Instruction::ICtz { .. }
+        | Instruction::IPopcnt { .. } => 9,
         Instruction::Cmp { .. } | Instruction::FCmp { .. } | Instruction::FCmpF64 { .. } => 14,
         Instruction::FImm { .. } | Instruction::FImmF64 { .. } => 9,
         Instruction::HostCall { args, results, .. } => {
@@ -236,6 +240,15 @@ fn encode_instruction(buf: &mut Vec<u8>, instr: &Instruction) {
         Instruction::ISub { dst, a, b } => { buf.push(0x26); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
         Instruction::IMul { dst, a, b } => { buf.push(0x27); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
         Instruction::IDiv { dst, a, b } => { buf.push(0x28); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::IAnd { dst, a, b } => { buf.push(0x29); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::IOr { dst, a, b } => { buf.push(0x2A); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::IXor { dst, a, b } => { buf.push(0x2B); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::INot { dst, a } => { buf.push(0x2C); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::IClz { dst, a } => { buf.push(0x2D); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::ICtz { dst, a } => { buf.push(0x2E); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::IPopcnt { dst, a } => { buf.push(0x2F); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::IRotl { dst, a, b } => { buf.push(0x30); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::IRotr { dst, a, b } => { buf.push(0x31); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
         Instruction::HostCall { id, args, results } => {
             buf.push(0x16);
             write_u32(buf, *id);
@@ -581,6 +594,15 @@ fn decode_instruction_from_cursor<R: Read>(cursor: &mut R) -> Result<Instruction
         0x26 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::ISub { dst, a, b }) }
         0x27 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IMul { dst, a, b }) }
         0x28 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IDiv { dst, a, b }) }
+        0x29 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IAnd { dst, a, b }) }
+        0x2A => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IOr { dst, a, b }) }
+        0x2B => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IXor { dst, a, b }) }
+        0x2C => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::INot { dst, a }) }
+        0x2D => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IClz { dst, a }) }
+        0x2E => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::ICtz { dst, a }) }
+        0x2F => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IPopcnt { dst, a }) }
+        0x30 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IRotl { dst, a, b }) }
+        0x31 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IRotr { dst, a, b }) }
         _ => Err(Error::Generic(format!("E4: unknown opcode {:#04x}", opcode))),
     }
 }
@@ -954,6 +976,15 @@ mod tests {
             Instruction::ISub { dst: 6, a: 0, b: 1 },
             Instruction::IMul { dst: 7, a: 0, b: 1 },
             Instruction::IDiv { dst: 0, a: 0, b: 1 },
+            Instruction::IAnd { dst: 0, a: 0, b: 1 },
+            Instruction::IOr { dst: 0, a: 0, b: 1 },
+            Instruction::IXor { dst: 0, a: 0, b: 1 },
+            Instruction::INot { dst: 0, a: 0 },
+            Instruction::IClz { dst: 0, a: 0 },
+            Instruction::ICtz { dst: 0, a: 0 },
+            Instruction::IPopcnt { dst: 0, a: 0 },
+            Instruction::IRotl { dst: 0, a: 0, b: 1 },
+            Instruction::IRotr { dst: 0, a: 0, b: 1 },
             Instruction::HostCall { id: 0, args: vec![0, 1], results: vec![2] },
         ];
         for instr in all_instructions {

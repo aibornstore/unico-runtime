@@ -285,6 +285,15 @@ fn fmt_instruction(out: &mut Out, instr: &Instruction, pc: usize) {
             out.plain(", ");
             out.reg(&format!("r{}", b));
         }
+        Instruction::IAnd { dst, a, b } => { out.op("iand"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); out.plain(", "); out.reg(&format!("r{}", b)); }
+        Instruction::IOr { dst, a, b } => { out.op("ior"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); out.plain(", "); out.reg(&format!("r{}", b)); }
+        Instruction::IXor { dst, a, b } => { out.op("ixor"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); out.plain(", "); out.reg(&format!("r{}", b)); }
+        Instruction::INot { dst, a } => { out.op("inot"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::IClz { dst, a } => { out.op("iclz"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::ICtz { dst, a } => { out.op("ictz"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::IPopcnt { dst, a } => { out.op("ipopcnt"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::IRotl { dst, a, b } => { out.op("irotl"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); out.plain(", "); out.reg(&format!("r{}", b)); }
+        Instruction::IRotr { dst, a, b } => { out.op("irotr"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); out.plain(", "); out.reg(&format!("r{}", b)); }
         Instruction::FAdd { dst, a, b } => {
             out.op("fadd");
             out.plain(" ");
