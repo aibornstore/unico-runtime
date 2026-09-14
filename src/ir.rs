@@ -5,9 +5,10 @@
 //! U30 byte encoding and does NOT change any UNICO readiness/release claim.
 
 use crate::error::{Error, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum U30Type {
     Bool,
     U8,
@@ -18,7 +19,7 @@ pub enum U30Type {
     F64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum U30Value {
     Bool(bool),
     U8(u8),
@@ -105,7 +106,7 @@ impl U30Value {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct U30RegionDecl {
     pub id: u32,
     pub size: usize,
@@ -114,13 +115,13 @@ pub struct U30RegionDecl {
     pub initial: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct U30TableDecl {
     pub id: u32,
     pub targets: Vec<usize>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum U30BinaryOp {
     AddWrapU64,
     AddWrapU32,
@@ -151,7 +152,7 @@ pub enum U30BinaryOp {
     MaxU32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum U30Op {
     Const { dst: u32, value: U30Value },
     Binary { dst: u32, op: U30BinaryOp, a: u32, b: u32 },
@@ -255,7 +256,7 @@ pub enum U30Op {
     StoreU64 { region: u32, offset: u32, src: u32 },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum U30Terminator {
     Br { target: usize },
     BrIf { cond: u32, then_target: usize, else_target: usize },
@@ -266,13 +267,13 @@ pub enum U30Terminator {
     Trap { code: u32 },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct U30Block {
     pub ops: Vec<U30Op>,
     pub terminator: U30Terminator,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct U30Function {
     pub params: Vec<U30Type>,
     pub results: Vec<U30Type>,
@@ -280,7 +281,7 @@ pub struct U30Function {
     pub entry_block: usize,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct U30Module {
     pub regions: Vec<U30RegionDecl>,
     pub tables: Vec<U30TableDecl>,
@@ -330,7 +331,7 @@ impl U30Module {
             // Each block has its own definition scope; start fresh from params only.
             // Block-local definitions don't leak to other blocks (no SSA phi-nodes).
             let mut block_defined: BTreeSet<u32> = (0..function.params.len() as u32).collect();
-            let mut defined = &mut block_defined; // local alias for brevity
+            let defined = &mut block_defined; // local alias for brevity
             for op in &block.ops {
                 let dst = match op {
                     U30Op::Const { dst, .. }
