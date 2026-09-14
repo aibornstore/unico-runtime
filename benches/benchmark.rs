@@ -1,5 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use unico_runtime::{E2Module, E2Executor, exec::e3::{E3Module, E3Executor, Instruction, build_e3}};
+use unico_runtime::exec::e4::{E4Module, E4FunctionDef, E4Executor, Instruction as E4Instr};
+use unico_runtime::{encode_e4, decode_e4};
+use unico_runtime::e4_disasm::fmt_module;
 
 /// Build a Python-compatible E2 module with the given code bytes.
 /// Python format: FUNC section = [func_count, param_count, result_count, register_count,
@@ -211,6 +214,177 @@ fn bench_e3_div(c: &mut Criterion) {
     });
 }
 
+// ---------------------------------------------------------------------------
+// E4 benchmarks
+// ---------------------------------------------------------------------------
+
+/// Build a simple E4 module with the given instructions.
+fn build_e4_module(code: Vec<E4Instr>) -> E4Module {
+    E4Module {
+        functions: vec![E4FunctionDef {
+            param_count: 0,
+            result_count: 1,
+            register_count: 16,
+            code,
+        }],
+        memory: vec![0u8; 4096],
+    }
+}
+
+/// E4 module with 10 fadd operations + ret.
+fn build_e4_fadd_module() -> E4Module {
+    let code = vec![
+        E4Instr::FImm { dst: 0, imm: 1.0 },
+        E4Instr::FImm { dst: 1, imm: 2.0 },
+        E4Instr::FAdd { dst: 2, a: 0, b: 1 },
+        E4Instr::FAdd { dst: 2, a: 2, b: 1 },
+        E4Instr::FAdd { dst: 2, a: 2, b: 1 },
+        E4Instr::FAdd { dst: 2, a: 2, b: 1 },
+        E4Instr::FAdd { dst: 2, a: 2, b: 1 },
+        E4Instr::FAdd { dst: 2, a: 2, b: 1 },
+        E4Instr::FAdd { dst: 2, a: 2, b: 1 },
+        E4Instr::FAdd { dst: 2, a: 2, b: 1 },
+        E4Instr::FAdd { dst: 2, a: 2, b: 1 },
+        E4Instr::Ret { dst: 2 },
+    ];
+    build_e4_module(code)
+}
+
+/// E4 module with all instruction types (17 variants).
+fn build_e4_all_ops_module() -> E4Module {
+    let code = vec![
+        E4Instr::FImm { dst: 0, imm: 3.0 },
+        E4Instr::FImm { dst: 1, imm: 2.0 },
+        E4Instr::FAdd { dst: 2, a: 0, b: 1 },
+        E4Instr::FSub { dst: 3, a: 0, b: 1 },
+        E4Instr::FMul { dst: 4, a: 0, b: 1 },
+        E4Instr::FDiv { dst: 5, a: 0, b: 1 },
+        E4Instr::FSqrt { dst: 6, a: 0 },
+        E4Instr::FNeg { dst: 7, a: 0 },
+        E4Instr::FAbs { dst: 8, a: 0 },
+        E4Instr::FRound { dst: 9, a: 0 },
+        E4Instr::FCmp { pred: 0, dst: 10, a: 0, b: 1 }, // ordered
+        E4Instr::I2F { dst: 11, a: 0 },
+        E4Instr::U2F { dst: 12, a: 0 },
+        E4Instr::Mov { dst: 13, src: 0 },
+        E4Instr::Ret { dst: 2 },
+    ];
+    build_e4_module(code)
+}
+
+fn bench_e4_encode(c: &mut Criterion) {
+    let module = build_e4_all_ops_module();
+    c.bench_function("e4_encode_all_ops", |b| {
+        b.iter(|| {
+            let bytes = encode_e4(black_box(&module));
+            black_box(bytes)
+        });
+    });
+}
+
+fn bench_e4_encode_many_functions(c: &mut Criterion) {
+    let code = vec![
+        E4Instr::FImm { dst: 0, imm: 1.0 },
+        E4Instr::FImm { dst: 1, imm: 2.0 },
+        E4Instr::FAdd { dst: 2, a: 0, b: 1 },
+        E4Instr::Ret { dst: 2 },
+    ];
+    let mut module = E4Module {
+        functions: Vec::new(),
+        memory: vec![0u8; 4096],
+    };
+    for _ in 0..100 {
+        module.functions.push(E4FunctionDef {
+            param_count: 0,
+            result_count: 1,
+            register_count: 8,
+            code: code.clone(),
+        });
+    }
+    c.bench_function("e4_encode_100_functions", |b| {
+        b.iter(|| {
+            let bytes = encode_e4(black_box(&module));
+            black_box(bytes)
+        });
+    });
+}
+
+fn bench_e4_decode(c: &mut Criterion) {
+    let module = build_e4_all_ops_module();
+    let bytes = encode_e4(&module);
+    let bytes = black_box(bytes);
+    c.bench_function("e4_decode_all_ops", |b| {
+        b.iter(|| {
+            let m = decode_e4(&bytes);
+            black_box(m)
+        });
+    });
+}
+
+fn bench_e4_decode_many_functions(c: &mut Criterion) {
+    let mut module = E4Module {
+        functions: Vec::new(),
+        memory: vec![0u8; 4096],
+    };
+    let code = vec![
+        E4Instr::FImm { dst: 0, imm: 1.0 },
+        E4Instr::FImm { dst: 1, imm: 2.0 },
+        E4Instr::FAdd { dst: 2, a: 0, b: 1 },
+        E4Instr::Ret { dst: 2 },
+    ];
+    for _ in 0..100 {
+        module.functions.push(E4FunctionDef {
+            param_count: 0,
+            result_count: 1,
+            register_count: 8,
+            code: code.clone(),
+        });
+    }
+    let bytes = encode_e4(&module);
+    let bytes = black_box(bytes);
+    c.bench_function("e4_decode_100_functions", |b| {
+        b.iter(|| {
+            let m = decode_e4(&bytes);
+            black_box(m)
+        });
+    });
+}
+
+fn bench_e4_disasm(c: &mut Criterion) {
+    let module = build_e4_all_ops_module();
+    let bytes = encode_e4(&module);
+    let bytes = black_box(bytes);
+    c.bench_function("e4_disasm_all_ops", |b| {
+        b.iter(|| {
+            let m = decode_e4(&bytes).unwrap();
+            let text = fmt_module(&m);
+            black_box(text)
+        });
+    });
+}
+
+fn bench_e4_execute(c: &mut Criterion) {
+    let module = build_e4_fadd_module();
+    c.bench_function("e4_execute_fadd_10x", |b| {
+        b.iter(|| {
+            let mut exec = E4Executor::default();
+            let r = exec.execute(black_box(&module), 0);
+            black_box(r)
+        });
+    });
+}
+
+fn bench_e4_execute_all_ops(c: &mut Criterion) {
+    let module = build_e4_all_ops_module();
+    c.bench_function("e4_execute_all_ops", |b| {
+        b.iter(|| {
+            let mut exec = E4Executor::default();
+            let r = exec.execute(black_box(&module), 0);
+            black_box(r)
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_e2_mem42,
@@ -222,5 +396,12 @@ criterion_group!(
     bench_e3_store_load,
     bench_e3_repeated_arith,
     bench_e3_div,
+    bench_e4_encode,
+    bench_e4_encode_many_functions,
+    bench_e4_decode,
+    bench_e4_decode_many_functions,
+    bench_e4_disasm,
+    bench_e4_execute,
+    bench_e4_execute_all_ops,
 );
 criterion_main!(benches);

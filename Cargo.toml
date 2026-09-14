@@ -21,3 +21,7 @@ criterion = "0.4"
 name = "unico"
 path = "src/cli/unico.rs"
 test = false
+
+[[bench]]
+name = "benchmark"
+harness = false
