@@ -59,7 +59,9 @@ fn instruction_size(instr: &Instruction) -> usize {
         Instruction::FAdd { .. } | Instruction::FSub { .. } | Instruction::FMul { .. }
         | Instruction::FDiv { .. }
         | Instruction::FAddF64 { .. } | Instruction::FSubF64 { .. } | Instruction::FMulF64 { .. }
-        | Instruction::FDivF64 { .. } => 13,
+        | Instruction::FDivF64 { .. }
+        | Instruction::IAdd { .. } | Instruction::ISub { .. } | Instruction::IMul { .. }
+        | Instruction::IDiv { .. } => 13,
         Instruction::Cmp { .. } | Instruction::FCmp { .. } | Instruction::FCmpF64 { .. } => 14,
         Instruction::FImm { .. } | Instruction::FImmF64 { .. } => 9,
         Instruction::HostCall { args, results, .. } => {
@@ -230,6 +232,10 @@ fn encode_instruction(buf: &mut Vec<u8>, instr: &Instruction) {
         Instruction::U2F64 { dst, a } => { buf.push(0x22); write_u32(buf, *dst); write_u32(buf, *a); }
         Instruction::F642U { dst, a } => { buf.push(0x23); write_u32(buf, *dst); write_u32(buf, *a); }
         Instruction::FImmF64 { dst, imm } => { buf.push(0x24); write_u32(buf, *dst); buf.extend_from_slice(&imm.to_bits().to_le_bytes()); }
+        Instruction::IAdd { dst, a, b } => { buf.push(0x25); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::ISub { dst, a, b } => { buf.push(0x26); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::IMul { dst, a, b } => { buf.push(0x27); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::IDiv { dst, a, b } => { buf.push(0x28); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
         Instruction::HostCall { id, args, results } => {
             buf.push(0x16);
             write_u32(buf, *id);
@@ -571,6 +577,10 @@ fn decode_instruction_from_cursor<R: Read>(cursor: &mut R) -> Result<Instruction
         0x22 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::U2F64 { dst, a }) }
         0x23 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::F642U { dst, a }) }
         0x24 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let imm = cursor.read_f64::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::FImmF64 { dst, imm }) }
+        0x25 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IAdd { dst, a, b }) }
+        0x26 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::ISub { dst, a, b }) }
+        0x27 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IMul { dst, a, b }) }
+        0x28 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IDiv { dst, a, b }) }
         _ => Err(Error::Generic(format!("E4: unknown opcode {:#04x}", opcode))),
     }
 }
@@ -940,6 +950,10 @@ mod tests {
             Instruction::F642I { dst: 2, a: 0 },
             Instruction::U2F64 { dst: 3, a: 0 },
             Instruction::F642U { dst: 4, a: 0 },
+            Instruction::IAdd { dst: 5, a: 0, b: 1 },
+            Instruction::ISub { dst: 6, a: 0, b: 1 },
+            Instruction::IMul { dst: 7, a: 0, b: 1 },
+            Instruction::IDiv { dst: 0, a: 0, b: 1 },
             Instruction::HostCall { id: 0, args: vec![0, 1], results: vec![2] },
         ];
         for instr in all_instructions {
@@ -1030,5 +1044,37 @@ mod tests {
         // Trap=1 opcode, Ret=5 bytes, FImm=9 bytes
         assert_eq!(bytes_trap.len(), bytes_ret.len() - 4, "Trap should be 4 bytes shorter than Ret");
         assert_eq!(bytes_fimm.len(), bytes_ret.len() + 4, "FImm should be 4 bytes longer than Ret");
+    }
+
+    #[test]
+    fn test_e4_encode_decode_integer_arithmetic() {
+        // IAdd/ISub/IMul/IDiv roundtrip
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+                    Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // r1 = 1
+                    Instruction::IAdd { dst: 2, a: 0, b: 1 },
+                    Instruction::ISub { dst: 3, a: 2, b: 0 },
+                    Instruction::IMul { dst: 4, a: 2, b: 1 },
+                    Instruction::IDiv { dst: 5, a: 4, b: 0 },
+                    Instruction::Ret { dst: 5 },
+                ],
+            }],
+            memory: vec![0u8; 256],
+        };
+        let encoded = encode_e4(&module);
+        let decoded = decode_e4(&encoded).unwrap();
+        assert_eq!(decoded.functions[0].code.len(), 7);
+        // Execute
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let result = exec.execute(&decoded, 0).unwrap();
+        assert_eq!(result.status, crate::types::Status::Pass);
+        // r0=1, r1=1, r2=2, r3=1, r4=2, r5=2
+        assert_eq!(result.value.unwrap(), 2);
     }
 }

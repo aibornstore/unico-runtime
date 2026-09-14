@@ -231,6 +231,27 @@ fn build_e4_module(code: Vec<E4Instr>) -> E4Module {
     }
 }
 
+/// E4 module with integer arithmetic: 10 iadd operations using host fn to set registers.
+fn build_e4_iadd_module() -> E4Module {
+    // Use Cmp to produce i32 values in registers
+    let code = vec![
+        E4Instr::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1 (0==0 = true)
+        E4Instr::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // r1 = 1
+        E4Instr::IAdd { dst: 0, a: 0, b: 1 }, // r0 = 2
+        E4Instr::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 2
+        E4Instr::IAdd { dst: 0, a: 0, b: 1 }, // r0 = 4
+        E4Instr::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 4
+        E4Instr::IAdd { dst: 0, a: 0, b: 1 }, // r0 = 8
+        E4Instr::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 8
+        E4Instr::IAdd { dst: 0, a: 0, b: 1 }, // r0 = 16
+        E4Instr::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 16
+        E4Instr::IAdd { dst: 0, a: 0, b: 1 }, // r0 = 32
+        E4Instr::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 32
+        E4Instr::Ret { dst: 0 },
+    ];
+    build_e4_module(code)
+}
+
 /// E4 module with F64 arithmetic: 10 fadd.f64 operations + ret.
 fn build_e4_f64_module() -> E4Module {
     let code = vec![
@@ -415,6 +436,17 @@ fn bench_e4_execute_f64(c: &mut Criterion) {
     });
 }
 
+fn bench_e4_execute_iadd(c: &mut Criterion) {
+    let module = build_e4_iadd_module();
+    c.bench_function("e4_execute_iadd_10x", |b| {
+        b.iter(|| {
+            let mut exec = E4Executor::default();
+            let r = exec.execute(black_box(&module), 0);
+            black_box(r)
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_e2_mem42,
@@ -434,5 +466,6 @@ criterion_group!(
     bench_e4_execute,
     bench_e4_execute_all_ops,
     bench_e4_execute_f64,
+    bench_e4_execute_iadd,
 );
 criterion_main!(benches);

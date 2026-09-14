@@ -40,6 +40,11 @@ pub enum Instruction {
     // E2 memory
     LoadI64 { dst: u32, addr: u32 },
     StoreI64 { addr: u32, src: u32 },
+    // E4 integer arithmetic (i32)
+    IAdd { dst: u32, a: u32, b: u32 },
+    ISub { dst: u32, a: u32, b: u32 },
+    IMul { dst: u32, a: u32, b: u32 },
+    IDiv { dst: u32, a: u32, b: u32 },
     // E4 floating-point binary (f32)
     FAdd { dst: u32, a: u32, b: u32 },
     FSub { dst: u32, a: u32, b: u32 },
@@ -251,6 +256,33 @@ impl E4Executor {
                         return Ok(ExecutionResult::fail("E4: store out of bounds".into(), self.provenance()));
                     }
                     memory[addr..addr+8].copy_from_slice(&val.to_le_bytes());
+                    pc += 1;
+                }
+                Instruction::IAdd { dst, a, b } => {
+                    let a = regs[*a as usize].as_i32()?;
+                    let b = regs[*b as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(a.wrapping_add(b));
+                    pc += 1;
+                }
+                Instruction::ISub { dst, a, b } => {
+                    let a = regs[*a as usize].as_i32()?;
+                    let b = regs[*b as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(a.wrapping_sub(b));
+                    pc += 1;
+                }
+                Instruction::IMul { dst, a, b } => {
+                    let a = regs[*a as usize].as_i32()?;
+                    let b = regs[*b as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(a.wrapping_mul(b));
+                    pc += 1;
+                }
+                Instruction::IDiv { dst, a, b } => {
+                    let a = regs[*a as usize].as_i32()?;
+                    let b = regs[*b as usize].as_i32()?;
+                    if b == 0 {
+                        return Ok(ExecutionResult::fail("E4: division by zero".into(), self.provenance()));
+                    }
+                    regs[*dst as usize] = E4Value::I32(a.wrapping_div(b));
                     pc += 1;
                 }
                 Instruction::FAdd { dst, a, b } => {
@@ -1142,5 +1174,86 @@ mod tests {
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.status, Status::Pass);
         assert_eq!(result.value.unwrap(), 3);
+    }
+
+    #[test]
+    fn test_e4_iadd() {
+        // IAdd: integer add using Cmp to produce non-zero values
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1 (0==0 = true)
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // r1 = 1
+            Instruction::IAdd { dst: 2, a: 0, b: 1 }, // r2 = 1 + 1 = 2
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 2);
+    }
+
+    #[test]
+    fn test_e4_isub() {
+        // ISub: integer subtraction
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // r1 = 1
+            Instruction::ISub { dst: 2, a: 0, b: 1 }, // r2 = 1 - 1 = 0
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_e4_imul() {
+        // IMul: integer multiply
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // r1 = 1
+            Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 2
+            Instruction::IMul { dst: 2, a: 0, b: 1 }, // r2 = 1 * 2 = 2
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 2);
+    }
+
+    #[test]
+    fn test_e4_idiv() {
+        // IDiv: integer division
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // r1 = 1
+            Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 2
+            Instruction::IDiv { dst: 2, a: 1, b: 0 }, // r2 = 2 / 1 = 2
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 2);
+    }
+
+    #[test]
+    fn test_e4_idiv_by_zero() {
+        // IDiv: division by zero fails (use host fn to get r0=0)
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::HostCall { id: 0, args: vec![], results: vec![0] }, // r0 = 0
+            Instruction::IDiv { dst: 1, a: 0, b: 0 }, // 0 / 0 = error
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.unwrap().contains("division by zero"));
     }
 }

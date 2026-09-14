@@ -249,6 +249,42 @@ fn fmt_instruction(out: &mut Out, instr: &Instruction, pc: usize) {
             out.plain("], ");
             out.reg(&format!("r{}", src));
         }
+        Instruction::IAdd { dst, a, b } => {
+            out.op("iadd");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+            out.plain(", ");
+            out.reg(&format!("r{}", b));
+        }
+        Instruction::ISub { dst, a, b } => {
+            out.op("isub");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+            out.plain(", ");
+            out.reg(&format!("r{}", b));
+        }
+        Instruction::IMul { dst, a, b } => {
+            out.op("imul");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+            out.plain(", ");
+            out.reg(&format!("r{}", b));
+        }
+        Instruction::IDiv { dst, a, b } => {
+            out.op("idiv");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+            out.plain(", ");
+            out.reg(&format!("r{}", b));
+        }
         Instruction::FAdd { dst, a, b } => {
             out.op("fadd");
             out.plain(" ");
@@ -650,5 +686,30 @@ mod tests {
         assert!(text.contains("fcmp.f64"), "missing fcmp.f64");
         assert!(text.contains("i2f64"), "missing i2f64");
         assert!(text.contains("f64i"), "missing f64i");
+    }
+
+    #[test]
+    fn test_disasm_integer_arithmetic() {
+        // Integer arithmetic instructions appear in disassembly
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::IAdd { dst: 0, a: 0, b: 1 },
+                    Instruction::ISub { dst: 1, a: 0, b: 2 },
+                    Instruction::IMul { dst: 2, a: 1, b: 3 },
+                    Instruction::IDiv { dst: 3, a: 2, b: 1 },
+                    Instruction::Ret { dst: 3 },
+                ],
+            }],
+            memory: vec![],
+        };
+        let text = fmt_module_opts(&module, FmtOpts::default());
+        assert!(text.contains("iadd"), "missing iadd");
+        assert!(text.contains("isub"), "missing isub");
+        assert!(text.contains("imul"), "missing imul");
+        assert!(text.contains("idiv"), "missing idiv");
     }
 }
