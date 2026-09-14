@@ -328,8 +328,12 @@ impl U30Module {
         if function.blocks.is_empty() || function.entry_block >= function.blocks.len() {
             return Err(Error::Verification(format!("U30X function {fn_index} has invalid entry block")));
         }
-        let mut defined: BTreeSet<u32> = (0..function.params.len() as u32).collect();
+        let mut global_defined: BTreeSet<u32> = (0..function.params.len() as u32).collect();
         for (block_index, block) in function.blocks.iter().enumerate() {
+            // Each block has its own definition scope; start from params
+            // (params are live-in to all blocks), but allow redefinition within block
+            let mut block_defined: BTreeSet<u32> = global_defined.clone();
+            let mut defined = &mut block_defined; // local alias for brevity
             for op in &block.ops {
                 let dst = match op {
                     U30Op::Const { dst, .. }
@@ -430,6 +434,7 @@ impl U30Module {
                 };
                 if let Some(dst) = dst {
                     // Parameters can be overwritten (SSA allows assigning over parameters)
+                    // Only flag redefinition if dst is NOT a parameter (i.e., dst >= params.len)
                     if dst >= function.params.len() as u32 && !defined.insert(dst) {
                         return Err(Error::Verification(format!(
                             "U30X function {fn_index} redefines value %{dst}"
@@ -691,7 +696,9 @@ impl U30Module {
                     U30Op::Nop => {}
                 }
             }
-            self.verify_terminator(fn_index, block_index, function, &block.terminator, &defined)?;
+            // Merge block's definitions into global set for cross-block tracking
+            global_defined.extend(block_defined.iter().cloned());
+            self.verify_terminator(fn_index, block_index, function, &block.terminator, &block_defined)?;
         }
         Ok(())
     }
