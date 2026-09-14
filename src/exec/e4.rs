@@ -17,6 +17,7 @@
 //!   (E2)  0x90 => LOAD.I64 0x91 => STORE.I64
 
 use crate::error::{Error, Result};
+use crate::host::HostFunctions;
 use crate::types::{ExecutionResult, Provenance};
 #[allow(unused_imports)]
 use crate::types::Status;
@@ -32,7 +33,7 @@ pub enum Instruction {
     // E1 control flow (baseline)
     Br { target: u32 },
     BrIf { cond: u32, target: u32 },
-    Ret,
+    Ret { dst: u32 },
     Trap,
     Cmp { pred: u8, dst: u32, a: u32, b: u32 },
     // E2 memory
@@ -59,6 +60,9 @@ pub enum Instruction {
     Mov { dst: u32, src: u32 },
     // E4 immediate (f32)
     FImm { dst: u32, imm: f32 },
+    // E4 host boundary v2: call a host function
+    // id = host function index, args = register indices, results = register indices
+    HostCall { id: u32, args: Vec<u32>, results: Vec<u32> },
 }
 
 /// E4 function definition
@@ -124,10 +128,11 @@ impl E4Value {
 // E4 executor
 // ---------------------------------------------------------------------------
 
-#[derive(Debug)]
 pub struct E4Executor {
     start: Instant,
     fuel: u64,
+    host_functions: HostFunctions,
+    host_calls: u32,
 }
 
 impl Default for E4Executor {
@@ -135,6 +140,8 @@ impl Default for E4Executor {
         Self {
             start: Instant::now(),
             fuel: 100_000,
+            host_functions: HostFunctions::new(),
+            host_calls: 0,
         }
     }
 }
@@ -144,10 +151,15 @@ impl E4Executor {
         Provenance {
             instructions: 0,
             fuel_remaining: self.fuel,
-            host_calls: 0,
+            host_calls: self.host_calls,
             duration_us: self.start.elapsed().as_micros() as u64,
             deterministic: true,
         }
+    }
+
+    /// Access the host function registry for registration.
+    pub fn host_functions_mut(&mut self) -> &mut HostFunctions {
+        &mut self.host_functions
     }
 
     pub fn execute(&mut self, module: &E4Module, _function_index: usize) -> Result<ExecutionResult> {
@@ -177,8 +189,8 @@ impl E4Executor {
                         pc += 1;
                     }
                 }
-                Instruction::Ret => {
-                    let val = match regs[0] {
+                Instruction::Ret { dst } => {
+                    let val = match regs[*dst as usize] {
                         E4Value::I32(v) => v as i64,
                         E4Value::F32(v) => v.to_bits() as i64,
                     };
@@ -315,6 +327,27 @@ impl E4Executor {
                     regs[*dst as usize] = E4Value::F32(*imm);
                     pc += 1;
                 }
+                Instruction::HostCall { id, args, results } => {
+                    // Read arguments from registers
+                    let arg_vals: Vec<E4Value> = args
+                        .iter()
+                        .map(|&r| regs[r as usize].clone())
+                        .collect();
+                    // Call the host function
+                    match self.host_functions.call(*id, &arg_vals) {
+                        Ok(result) => {
+                            // Write result(s) back to registers
+                            for (i, &dst_reg) in results.iter().enumerate() {
+                                regs[dst_reg as usize] = result.clone();
+                            }
+                            self.host_calls += 1;
+                        }
+                        Err(e) => {
+                            return Ok(ExecutionResult::fail(e, self.provenance()));
+                        }
+                    }
+                    pc += 1;
+                }
             }
         }
     }
@@ -327,6 +360,7 @@ impl E4Executor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host::HostFunctions;
 
     fn make_module(code: Vec<Instruction>) -> E4Module {
         E4Module {
@@ -359,7 +393,7 @@ mod tests {
             Instruction::FAdd { dst: 2, a: 0, b: 1 },
             Instruction::Mov { dst: 10, src: 2 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0);
         assert!(result.is_ok(), "execution should succeed");
@@ -378,7 +412,7 @@ mod tests {
             Instruction::FSub { dst: 2, a: 0, b: 1 },
             Instruction::Mov { dst: 10, src: 2 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         let bits = result.value.unwrap() as u32;
@@ -395,7 +429,7 @@ mod tests {
             Instruction::FMul { dst: 2, a: 0, b: 1 },
             Instruction::Mov { dst: 10, src: 2 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         let bits = result.value.unwrap() as u32;
@@ -412,7 +446,7 @@ mod tests {
             Instruction::FDiv { dst: 2, a: 0, b: 1 },
             Instruction::Mov { dst: 10, src: 2 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         let bits = result.value.unwrap() as u32;
@@ -428,7 +462,7 @@ mod tests {
             Instruction::FSqrt { dst: 1, a: 0 },
             Instruction::Mov { dst: 10, src: 1 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         let bits = result.value.unwrap() as u32;
@@ -444,7 +478,7 @@ mod tests {
             Instruction::FNeg { dst: 1, a: 0 },
             Instruction::Mov { dst: 10, src: 1 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         let bits = result.value.unwrap() as u32;
@@ -460,7 +494,7 @@ mod tests {
             Instruction::FAbs { dst: 1, a: 0 },
             Instruction::Mov { dst: 10, src: 1 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         let bits = result.value.unwrap() as u32;
@@ -477,7 +511,7 @@ mod tests {
             Instruction::FCmp { pred: 0, dst: 2, a: 0, b: 1 }, // 2.0 < 5.0
             Instruction::Mov { dst: 10, src: 2 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.value.unwrap(), 1);
@@ -492,7 +526,7 @@ mod tests {
             Instruction::FCmp { pred: 4, dst: 2, a: 0, b: 1 }, // 3.0 == 3.0
             Instruction::Mov { dst: 10, src: 2 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.value.unwrap(), 1);
@@ -507,7 +541,7 @@ mod tests {
             Instruction::FCmp { pred: 2, dst: 2, a: 0, b: 1 }, // 10.0 > 3.0
             Instruction::Mov { dst: 10, src: 2 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.value.unwrap(), 1);
@@ -522,7 +556,7 @@ mod tests {
             Instruction::FCmp { pred: 0, dst: 2, a: 0, b: 1 }, // 5.0 < 3.0 = false
             Instruction::Mov { dst: 10, src: 2 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.value.unwrap(), 0);
@@ -536,7 +570,7 @@ mod tests {
             Instruction::FRound { dst: 1, a: 0 },
             Instruction::Mov { dst: 10, src: 1 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         let bits = result.value.unwrap() as u32;
@@ -553,7 +587,7 @@ mod tests {
             Instruction::FDiv { dst: 2, a: 0, b: 1 },
             Instruction::Mov { dst: 10, src: 2 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.status, Status::Fail, "should fail on div by zero");
@@ -569,7 +603,7 @@ mod tests {
             Instruction::I2F { dst: 1, a: 0 }, // 1 -> 1.0
             Instruction::Mov { dst: 10, src: 1 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         let bits = result.value.unwrap() as u32;
@@ -586,7 +620,7 @@ mod tests {
             Instruction::U2F { dst: 1, a: 0 }, // 1 -> 1.0
             Instruction::Mov { dst: 10, src: 1 },
             Instruction::Mov { dst: 0, src: 10 },
-            Instruction::Ret,
+            Instruction::Ret { dst: 0 },
         ]);
         let result = exec.execute(&module, 0).unwrap();
         let bits = result.value.unwrap() as u32;
@@ -614,5 +648,72 @@ mod tests {
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.status, Status::Fail);
         assert!(result.error.unwrap().contains("no functions"));
+    }
+
+    #[test]
+    fn test_e4_hostcall_works() {
+        // HostCall to a registered host function that returns I32(42)
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(42));
+        let module = make_module(vec![
+            Instruction::HostCall { id: 0, args: vec![], results: vec![0] },
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 42);
+        assert_eq!(result.provenance.host_calls, 1);
+    }
+
+    #[test]
+    fn test_e4_hostcall_with_args() {
+        // HostCall receives arguments from registers and returns a value
+        let mut exec = E4Executor::default();
+        // Host function: doubles its f32 argument
+        exec.host_functions_mut().register(|args| {
+            let v = match &args[0] {
+                E4Value::F32(n) => *n as i32 * 2,
+                _ => 0,
+            };
+            E4Value::I32(v)
+        });
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 21.0 }, // r0 = 21.0
+            Instruction::HostCall { id: 0, args: vec![0], results: vec![1] },
+            Instruction::Ret { dst: 1 }, // reads from result register (r1)
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 42);
+    }
+
+    #[test]
+    fn test_e4_hostcall_oob_fails() {
+        // HostCall with out-of-bounds function ID returns error
+        let mut exec = E4Executor::default();
+        // No host functions registered
+        let module = make_module(vec![
+            Instruction::HostCall { id: 99, args: vec![], results: vec![0] },
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.unwrap().contains("not found"));
+        assert_eq!(result.provenance.host_calls, 0);
+    }
+
+    #[test]
+    fn test_e4_hostcall_multiple() {
+        // Multiple host calls increment provenance correctly
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(1));
+        let module = make_module(vec![
+            Instruction::HostCall { id: 0, args: vec![], results: vec![0] },
+            Instruction::HostCall { id: 0, args: vec![], results: vec![0] },
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.provenance.host_calls, 2);
     }
 }

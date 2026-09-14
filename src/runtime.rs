@@ -689,6 +689,9 @@ impl U30Runtime {
                 let d = self.reg(regs, *delta)?.as_u64()? as usize;
                 let state = regions.get_mut(region)
                     .ok_or_else(|| Error::Generic(format!("U30X missing region")))?;
+                if !state.writable {
+                    return Err(Error::Generic(format!("U30X region {region} is not writable")));
+                }
                 let old_size = state.bytes.len();
                 state.bytes.resize(old_size + d, 0);
                 regs.insert(*dst, U30Value::U64(old_size as u64));
@@ -3235,5 +3238,232 @@ mod tests {
         };
         let out = U30Runtime::default().execute_experimental(&module, &[]).expect("ok");
         assert_eq!(out.results[0], U30Value::U64(10), "indirect call to double(5) = 10");
+    }
+
+    #[test]
+    fn u30x_tablebr_oob_fails() {
+        // TableBr with index >= table.len() should return error
+        let dispatch_fn = U30Function {
+            params: vec![U30Type::U64],
+            results: vec![U30Type::U64],
+            blocks: vec![
+                U30Block {
+                    ops: vec![
+                        U30Op::TableBr { table: 0, index: 0 }, // read idx from r0, jump to table[idx]
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] }, // unreachable
+                },
+                U30Block {
+                    ops: vec![U30Op::Const { dst: 1, value: U30Value::U64(10) }],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                },
+            ],
+            entry_block: 0,
+        };
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![1] }, // only 1 target (index 0)
+            ],
+            functions: vec![dispatch_fn],
+            entry_function: 0,
+        };
+        // Index 99 is out of bounds (table has only 1 target at index 0)
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[U30Value::U64(99)])
+            .expect_err("tablebr oob");
+        assert!(err.to_string().contains("out of bounds"), "expected OOB error: {}", err);
+    }
+
+    #[test]
+    fn u30x_load_u8_oob_fails() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 4, readable: true, writable: true, initial: vec![1, 2, 3, 4],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U8],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(10) }, // offset=10, region=4 bytes
+                        U30Op::LoadU8 { dst: 1, region: 0, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("load u8 oob");
+        assert!(err.to_string().contains("out of bounds"), "expected OOB: {}", err);
+    }
+
+    #[test]
+    fn u30x_store_u8_oob_fails() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 4, readable: true, writable: true, initial: vec![1, 2, 3, 4],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(100) }, // offset=100, region=4 bytes
+                        U30Op::Const { dst: 1, value: U30Value::U8(42) },
+                        U30Op::StoreU8 { region: 0, offset: 0, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("store u8 oob");
+        assert!(err.to_string().contains("out of bounds"), "expected OOB: {}", err);
+    }
+
+    #[test]
+    fn u30x_load_u64_oob_fails() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 8, readable: true, writable: true, initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(5) }, // offset=5, 5+8=13 > 8
+                        U30Op::LoadU64 { dst: 1, region: 0, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("load u64 oob");
+        assert!(err.to_string().contains("out of bounds"), "expected OOB: {}", err);
+    }
+
+    #[test]
+    fn u30x_store_u64_oob_fails() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 8, readable: true, writable: true, initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(7) }, // offset=7, 7+8=15 > 8
+                        U30Op::Const { dst: 1, value: U30Value::U64(u64::MAX) },
+                        U30Op::StoreU64 { region: 0, offset: 0, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("store u64 oob");
+        assert!(err.to_string().contains("out of bounds"), "expected OOB: {}", err);
+    }
+
+    #[test]
+    fn u30x_indirect_call_oob_fails() {
+        // IndirectCall with function index out of bounds
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(99) }, // fn_idx = 99 (out of bounds)
+                        U30Op::IndirectCall { function: 0, args: vec![], results: vec![1] },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("indirect call oob");
+        assert!(err.to_string().contains("out of bounds"), "expected OOB: {}", err);
+    }
+
+    #[test]
+    fn u30x_memgrow_non_writable_fails() {
+        // MemGrow on a read-only region should fail
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 4, readable: true, writable: false, initial: vec![1, 2, 3, 4],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(4) },
+                        U30Op::MemGrow { dst: 1, region: 0, delta: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("memgrow read-only");
+        assert!(err.to_string().contains("not writable"), "expected not writable: {}", err);
+    }
+
+    #[test]
+    fn u30x_load_non_readable_fails() {
+        // Load from non-readable region should fail
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 4, readable: false, writable: true, initial: vec![1, 2, 3, 4],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U8],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::LoadU8 { dst: 1, region: 0, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("load non-readable");
+        assert!(err.to_string().contains("not readable"), "expected not readable: {}", err);
     }
 }
