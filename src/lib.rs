@@ -12,7 +12,9 @@ pub mod host;
 pub mod ir;
 pub mod types;
 pub mod runtime;
+pub mod ser;
 
 pub use error::{Error, Result};
 pub use exec::{E0Executor, E0Module, E1Executor, E1Module, E2Executor, E2Module, E3Executor, E3Module};
+pub use ser::{encode, decode};
 pub use types::{I64, Profile, Status, Provenance};
