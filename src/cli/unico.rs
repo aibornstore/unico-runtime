@@ -57,6 +57,11 @@ enum Commands {
         /// Hex-encoded input arguments (for E3/E4, e.g. "0a 00 2a")
         #[arg(short, long)]
         args: Option<String>,
+
+        /// Register built-in host functions (e4 only):
+        /// print_i32, add_i32, mul_i32, sub_i32, div_i32, read_i32, write_i32
+        #[arg(long, value_delimiter = ',', default_value = "")]
+        host_fn: Vec<String>,
     },
     /// Interactive debugger for U30 modules
     Debug {
@@ -120,8 +125,8 @@ fn main() {
     let verbose = cli.verbose;
 
     let result = match cli.command {
-        Commands::Run { file, profile, fuel, args } => {
-            run_module(&file, &profile, fuel, args.as_deref(), verbose)
+        Commands::Run { file, profile, fuel, args, host_fn } => {
+            run_module(&file, &profile, fuel, args.as_deref(), &host_fn, verbose)
         }
         Commands::Debug { file, fuel } => {
             debug_module(&file, fuel, verbose)
