@@ -15,7 +15,8 @@
 
 use crate::error::{Error, Result};
 use crate::exec::e4::{E4FunctionDef, E4Module, E4Value, Instruction};
-use std::io::Write;
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{Read, Write};
 
 const MAGIC: &[u8] = b"E4XX";
 const VERSION: u8 = 1;
@@ -186,82 +187,67 @@ fn write_u32(buf: &mut Vec<u8>, v: u32) {
     buf.extend_from_slice(&v.to_le_bytes());
 }
 
-fn read_u32(buf: &[u8], pos: &mut usize) -> Result<u32> {
-    if *pos + 4 > buf.len() {
-        return Err(Error::Generic("E4: truncated data".into()));
-    }
-    let v = u32::from_le_bytes([buf[*pos], buf[*pos + 1], buf[*pos + 2], buf[*pos + 3]]);
-    *pos += 4;
-    Ok(v)
-}
-
-fn read_u8(buf: &[u8], pos: &mut usize) -> Result<u8> {
-    if *pos >= buf.len() {
-        return Err(Error::Generic("E4: truncated data".into()));
-    }
-    let v = buf[*pos];
-    *pos += 1;
-    Ok(v)
-}
-
-fn read_f32(buf: &[u8], pos: &mut usize) -> Result<f32> {
-    if *pos + 4 > buf.len() {
-        return Err(Error::Generic("E4: truncated data".into()));
-    }
-    let bits = u32::from_le_bytes([buf[*pos], buf[*pos + 1], buf[*pos + 2], buf[*pos + 3]]);
-    *pos += 4;
-    Ok(f32::from_bits(bits))
-}
-
 /// Decode an E4Module from binary format.
 pub fn decode_e4(buf: &[u8]) -> Result<E4Module> {
-    let mut pos = 0;
+    // Fast path: use byteorder Cursor for bulk reads
+    let mut cursor = std::io::Cursor::new(buf);
 
-    // Header
-    if buf.len() < pos + 4 {
-        return Err(Error::Generic("E4: truncated header".into()));
+    // Header: check magic
+    {
+        let mut magic_buf = [0u8; 4];
+        cursor.read_exact(&mut magic_buf).map_err(|_| {
+            Error::Generic("E4: truncated header".into())
+        })?;
+        if &magic_buf != MAGIC {
+            return Err(Error::Generic("E4: bad magic".into()));
+        }
     }
-    if &buf[pos..pos + 4] != MAGIC {
-        return Err(Error::Generic("E4: bad magic".into()));
-    }
-    pos += 4;
 
-    if buf.len() < pos + 1 {
-        return Err(Error::Generic("E4: truncated header".into()));
-    }
-    let version = buf[pos];
-    pos += 1;
+    let version = cursor.read_u8().map_err(|_| {
+        Error::Generic("E4: truncated header".into())
+    })?;
     if version != VERSION {
         return Err(Error::Generic(format!("E4: unsupported version {}", version)));
     }
 
     // Memory
-    let mem_size = read_u32(buf, &mut pos)? as usize;
-    if pos + mem_size > buf.len() {
-        return Err(Error::Generic("E4: truncated memory data".into()));
-    }
-    let memory = buf[pos..pos + mem_size].to_vec();
-    pos += mem_size;
+    let mem_size = cursor.read_u32::<LittleEndian>().map_err(|_| {
+        Error::Generic("E4: truncated data".into())
+    })? as usize;
+    let mut memory = vec![0u8; mem_size];
+    cursor.read_exact(&mut memory).map_err(|_| {
+        Error::Generic("E4: truncated memory data".into())
+    })?;
 
     // Functions
-    let fn_count = read_u32(buf, &mut pos)? as usize;
+    let fn_count = cursor.read_u32::<LittleEndian>().map_err(|_| {
+        Error::Generic("E4: truncated data".into())
+    })? as usize;
     let mut functions = Vec::with_capacity(fn_count);
     for _ in 0..fn_count {
-        functions.push(decode_function(buf, &mut pos)?);
+        functions.push(decode_function_from_cursor(&mut cursor)?);
     }
 
     Ok(E4Module { functions, memory })
 }
 
-fn decode_function(buf: &[u8], pos: &mut usize) -> Result<E4FunctionDef> {
-    let param_count = read_u32(buf, pos)? as usize;
-    let result_count = read_u32(buf, pos)? as usize;
-    let register_count = read_u32(buf, pos)? as usize;
-    let instr_count = read_u32(buf, pos)? as usize;
+fn decode_function_from_cursor<R: Read>(cursor: &mut R) -> Result<E4FunctionDef> {
+    let param_count = cursor.read_u32::<LittleEndian>().map_err(|_| {
+        Error::Generic("E4: truncated data".into())
+    })? as usize;
+    let result_count = cursor.read_u32::<LittleEndian>().map_err(|_| {
+        Error::Generic("E4: truncated data".into())
+    })? as usize;
+    let register_count = cursor.read_u32::<LittleEndian>().map_err(|_| {
+        Error::Generic("E4: truncated data".into())
+    })? as usize;
+    let instr_count = cursor.read_u32::<LittleEndian>().map_err(|_| {
+        Error::Generic("E4: truncated data".into())
+    })? as usize;
 
     let mut code = Vec::with_capacity(instr_count);
     for _ in 0..instr_count {
-        code.push(decode_instruction(buf, pos)?);
+        code.push(decode_instruction_from_cursor(cursor)?);
     }
 
     Ok(E4FunctionDef {
@@ -272,132 +258,240 @@ fn decode_function(buf: &[u8], pos: &mut usize) -> Result<E4FunctionDef> {
     })
 }
 
-fn decode_instruction(buf: &[u8], pos: &mut usize) -> Result<Instruction> {
-    let opcode = read_u8(buf, pos)?;
+fn decode_instruction_from_cursor<R: Read>(cursor: &mut R) -> Result<Instruction> {
+    let opcode = cursor.read_u8().map_err(|_| {
+        Error::Generic("E4: truncated data".into())
+    })?;
     match opcode {
         0x00 => {
-            let target = read_u32(buf, pos)?;
+            let target = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::Br { target })
         }
         0x01 => {
-            let cond = read_u32(buf, pos)?;
-            let target = read_u32(buf, pos)?;
+            let cond = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let target = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::BrIf { cond, target })
         }
         0x02 => {
-            let dst = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::Ret { dst })
         }
         0x03 => Ok(Instruction::Trap),
         0x04 => {
-            let pred = read_u8(buf, pos)?;
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
-            let b = read_u32(buf, pos)?;
+            let pred = cursor.read_u8().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let b = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::Cmp { pred, dst, a, b })
         }
         0x05 => {
-            let dst = read_u32(buf, pos)?;
-            let addr = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let addr = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::LoadI64 { dst, addr })
         }
         0x06 => {
-            let addr = read_u32(buf, pos)?;
-            let src = read_u32(buf, pos)?;
+            let addr = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let src = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::StoreI64 { addr, src })
         }
         0x07 => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
-            let b = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let b = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::FAdd { dst, a, b })
         }
         0x08 => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
-            let b = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let b = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::FSub { dst, a, b })
         }
         0x09 => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
-            let b = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let b = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::FMul { dst, a, b })
         }
         0x0A => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
-            let b = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let b = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::FDiv { dst, a, b })
         }
         0x0B => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::FSqrt { dst, a })
         }
         0x0C => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::FNeg { dst, a })
         }
         0x0D => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::FAbs { dst, a })
         }
         0x0E => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::FRound { dst, a })
         }
         0x0F => {
-            let pred = read_u8(buf, pos)?;
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
-            let b = read_u32(buf, pos)?;
+            let pred = cursor.read_u8().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let b = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::FCmp { pred, dst, a, b })
         }
         0x10 => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::I2F { dst, a })
         }
         0x11 => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::F2I { dst, a })
         }
         0x12 => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::U2F { dst, a })
         }
         0x13 => {
-            let dst = read_u32(buf, pos)?;
-            let a = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let a = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::F2U { dst, a })
         }
         0x14 => {
-            let dst = read_u32(buf, pos)?;
-            let src = read_u32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let src = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::Mov { dst, src })
         }
         0x15 => {
-            let dst = read_u32(buf, pos)?;
-            let imm = read_f32(buf, pos)?;
+            let dst = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let imm = cursor.read_f32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
             Ok(Instruction::FImm { dst, imm })
         }
         0x16 => {
-            let id = read_u32(buf, pos)?;
-            let arg_count = read_u32(buf, pos)? as usize;
+            let id = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            let arg_count = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })? as usize;
             let mut args = Vec::with_capacity(arg_count);
             for _ in 0..arg_count {
-                args.push(read_u32(buf, pos)?);
+                args.push(cursor.read_u32::<LittleEndian>().map_err(|_| {
+                    Error::Generic("E4: truncated data".into())
+                })?);
             }
-            let result_count = read_u32(buf, pos)? as usize;
+            let result_count = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })? as usize;
             let mut results = Vec::with_capacity(result_count);
             for _ in 0..result_count {
-                results.push(read_u32(buf, pos)?);
+                results.push(cursor.read_u32::<LittleEndian>().map_err(|_| {
+                    Error::Generic("E4: truncated data".into())
+                })?);
             }
             Ok(Instruction::HostCall { id, args, results })
         }

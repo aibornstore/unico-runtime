@@ -101,7 +101,7 @@ pub struct U30DebugState {
 }
 
 #[derive(Debug, Clone)]
-struct RegionData {
+pub struct RegionData {
     bytes: Vec<u8>,
     readable: bool,
     writable: bool,
@@ -455,7 +455,7 @@ impl U30Debugger {
                 regions,
                 steps: self.state.steps,
             },
-            Err(e) => U30ExecutionOutcome {
+            Err(_e) => U30ExecutionOutcome {
                 results: vec![],
                 regions,
                 steps: self.state.steps,

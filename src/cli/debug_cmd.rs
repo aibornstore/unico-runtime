@@ -1,7 +1,7 @@
 //! `unico debug` — interactive U30 debugger
 
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::path::Path;
 use unico_runtime::decode;
 use unico_runtime::debugger::{U30Debugger, Breakpoint, U30DebugEvent};

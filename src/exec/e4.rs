@@ -329,7 +329,7 @@ impl E4Executor {
                     match self.host_functions.call(*id, &arg_vals) {
                         Ok(result) => {
                             // Write result(s) back to registers
-                            for (i, &dst_reg) in results.iter().enumerate() {
+                            for &dst_reg in results.iter() {
                                 regs[dst_reg as usize] = result.clone();
                             }
                             self.host_calls += 1;

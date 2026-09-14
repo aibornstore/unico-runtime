@@ -3,10 +3,8 @@
 use std::fs;
 use std::path::Path;
 use unico_runtime::decode;
-use unico_runtime::decode_disasm;
 use unico_runtime::decode_disasm_opts;
 use unico_runtime::e4_disasm::FmtOpts as E4DisasmOpts;
-use unico_runtime::fmt_module;
 use unico_runtime::fmt_module_opts;
 use unico_runtime::pretty::FmtOpts;
 

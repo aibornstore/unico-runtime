@@ -13,7 +13,7 @@
 
 use crate::e4_ser::decode_e4;
 use crate::error::Result;
-use crate::exec::e4::{E4FunctionDef, E4Module, E4Value, Instruction};
+use crate::exec::e4::{E4FunctionDef, E4Module, Instruction};
 
 // ---------------------------------------------------------------------------
 // Options
