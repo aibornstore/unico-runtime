@@ -1,0 +1,501 @@
+//! E4 Disassembler — binary → human-readable text
+//!
+//! ## Example
+//! ```rust,no_run
+//! use unico_runtime::decode_disasm;
+//! use unico_runtime::e4_disasm::FmtOpts;
+//! let bytes = vec![]; // read from file with std::fs::read
+//! let text = decode_disasm(&bytes).unwrap(); // colored
+//! let opts = FmtOpts { colors: false, show_memory: true, hex_cols: 16 };
+//! let text = unico_runtime::decode_disasm_opts(&bytes, opts).unwrap(); // plain
+//! println!("{}", text);
+//! ```
+
+use crate::e4_ser::decode_e4;
+use crate::error::Result;
+use crate::exec::e4::{E4FunctionDef, E4Module, E4Value, Instruction};
+
+// ---------------------------------------------------------------------------
+// Options
+// ---------------------------------------------------------------------------
+
+#[derive(Default, Clone)]
+pub struct FmtOpts {
+    /// Use ANSI color codes. Default: true.
+    pub colors: bool,
+    /// Show memory as hex. Default: true.
+    pub show_memory: bool,
+    /// Max hex bytes per line. Default: 16.
+    pub hex_cols: usize,
+}
+
+impl FmtOpts {
+    pub fn colors(self, yes: bool) -> Self {
+        Self { colors: yes, ..self }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Color codes
+// ---------------------------------------------------------------------------
+
+struct Out {
+    buf: String,
+    opts: FmtOpts,
+}
+
+impl Out {
+    fn new(opts: FmtOpts) -> Self {
+        Self { buf: String::new(), opts }
+    }
+
+    fn writeln(&mut self, s: &str) {
+        self.buf.push_str(s);
+        self.buf.push('\n');
+    }
+
+    fn push_colored(&mut self, s: &str, color: &str) {
+        if self.opts.colors {
+            self.buf.push_str(color);
+        }
+        self.buf.push_str(s);
+        if self.opts.colors {
+            self.buf.push_str(RESET);
+        }
+    }
+
+    fn kw(&mut self, s: &str) { self.push_colored(s, MAGENTA); }
+    fn op(&mut self, s: &str) { self.push_colored(s, BOLD); }
+    fn reg(&mut self, s: &str) { self.push_colored(s, YELLOW); }
+    fn type_(&mut self, s: &str) { self.push_colored(s, CYAN); }
+    fn value(&mut self, s: &str) { self.push_colored(s, GREEN); }
+    fn comment(&mut self, s: &str) {
+        if self.opts.colors {
+            self.buf.push_str(DIM);
+        }
+        self.buf.push_str(s);
+        if self.opts.colors {
+            self.buf.push_str(RESET);
+        }
+    }
+    fn error(&mut self, s: &str) { self.push_colored(s, RED); }
+    fn plain(&mut self, s: &str) { self.buf.push_str(s); }
+
+    fn finish(self) -> String { self.buf }
+}
+
+const RESET: &str = "\x1b[0m";
+const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
+const RED: &str = "\x1b[31m";
+const GREEN: &str = "\x1b[32m";
+const YELLOW: &str = "\x1b[33m";
+const CYAN: &str = "\x1b[36m";
+const MAGENTA: &str = "\x1b[35m";
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Decode E4 binary and format as readable text (colors enabled).
+pub fn decode_disasm(data: &[u8]) -> Result<String> {
+    decode_disasm_opts(data, FmtOpts::default())
+}
+
+/// Decode E4 binary and format as readable text with options.
+pub fn decode_disasm_opts(data: &[u8], opts: FmtOpts) -> Result<String> {
+    let module = decode_e4(data)?;
+    Ok(fmt_module_opts(&module, opts))
+}
+
+/// Format a decoded E4Module as readable text.
+pub fn fmt_module(module: &E4Module) -> String {
+    fmt_module_opts(module, FmtOpts::default())
+}
+
+/// Format a decoded E4Module with options.
+pub fn fmt_module_opts(module: &E4Module, opts: FmtOpts) -> String {
+    let show_memory = opts.show_memory;
+    let hex_cols = opts.hex_cols;
+    let mut out = Out::new(opts);
+
+    out.writeln("");
+    out.push_colored("; ══════════════════════════ E4 Module ══════════════════════════", DIM);
+    out.writeln("");
+
+    // Memory
+    if show_memory && !module.memory.is_empty() {
+        out.kw("memory");
+        out.plain(" ");
+        out.comment(&format!("{} bytes", module.memory.len()));
+        out.writeln(":");
+        for (i, chunk) in module.memory.chunks(hex_cols).enumerate() {
+            let addr = i * hex_cols;
+            let hex: String = chunk.iter().map(|b| format!("{:02x} ", b)).collect();
+            out.plain("  ");
+            out.value(&format!("{:04x}", addr));
+            out.plain("  ");
+            out.comment(&hex);
+            out.writeln("");
+        }
+    }
+
+    // Functions
+    out.kw("functions");
+    out.plain(" ");
+    out.writeln("{");
+    for (fi, f) in module.functions.iter().enumerate() {
+        fmt_function(&mut out, f, fi);
+    }
+    out.writeln("}");
+    out.writeln("");
+    out.push_colored("; ══════════════════════════════════════════════════════════════", DIM);
+    out.writeln("");
+
+    out.finish()
+}
+
+fn fmt_function(out: &mut Out, f: &E4FunctionDef, fi: usize) {
+    // Signature
+    out.plain("  ");
+    out.op("fn");
+    out.plain(" ");
+    out.value(&format!("{}", fi));
+    out.plain("(");
+    for i in 0..f.param_count {
+        if i > 0 {
+            out.plain(", ");
+        }
+        out.type_("i32");
+    }
+    out.plain(")");
+    if f.result_count > 0 {
+        out.plain(" -> ");
+        for i in 0..f.result_count {
+            if i > 0 {
+                out.plain(", ");
+            }
+            out.type_("i32");
+        }
+    }
+    out.comment(&format!(
+        "  ; regs={} params={} results={}",
+        f.register_count, f.param_count, f.result_count
+    ));
+
+    // Code
+    for (pc, instr) in f.code.iter().enumerate() {
+        fmt_instruction(out, instr, pc);
+    }
+}
+
+fn fmt_instruction(out: &mut Out, instr: &Instruction, pc: usize) {
+    out.plain("    ");
+    out.comment(&format!("{:4}: ", pc));
+
+    match instr {
+        Instruction::Br { target } => {
+            out.op("br");
+            out.plain(" block");
+            out.value(&format!("{}", target));
+        }
+        Instruction::BrIf { cond, target } => {
+            out.op("br.if");
+            out.plain(" ");
+            out.reg(&format!("r{}", cond));
+            out.plain(" -> block");
+            out.value(&format!("{}", target));
+        }
+        Instruction::Ret { dst } => {
+            out.op("ret");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+        }
+        Instruction::Trap => {
+            out.error("trap");
+        }
+        Instruction::Cmp { pred, dst, a, b } => {
+            out.op("cmp");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+            out.plain(", ");
+            out.reg(&format!("r{}", b));
+            out.comment(&format!(" pred={}", pred));
+        }
+        Instruction::LoadI64 { dst, addr } => {
+            out.op("load.i64");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", [r");
+            out.reg(&format!("{}", addr));
+            out.plain("]");
+        }
+        Instruction::StoreI64 { addr, src } => {
+            out.op("store.i64");
+            out.plain(" [r");
+            out.reg(&format!("{}", addr));
+            out.plain("], ");
+            out.reg(&format!("r{}", src));
+        }
+        Instruction::FAdd { dst, a, b } => {
+            out.op("fadd");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+            out.plain(", ");
+            out.reg(&format!("r{}", b));
+        }
+        Instruction::FSub { dst, a, b } => {
+            out.op("fsub");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+            out.plain(", ");
+            out.reg(&format!("r{}", b));
+        }
+        Instruction::FMul { dst, a, b } => {
+            out.op("fmul");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+            out.plain(", ");
+            out.reg(&format!("r{}", b));
+        }
+        Instruction::FDiv { dst, a, b } => {
+            out.op("fdiv");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+            out.plain(", ");
+            out.reg(&format!("r{}", b));
+        }
+        Instruction::FSqrt { dst, a } => {
+            out.op("fsqrt");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+        }
+        Instruction::FNeg { dst, a } => {
+            out.op("fneg");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+        }
+        Instruction::FAbs { dst, a } => {
+            out.op("fabs");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+        }
+        Instruction::FRound { dst, a } => {
+            out.op("fround");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+        }
+        Instruction::FCmp { pred, dst, a, b } => {
+            out.op("fcmp");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+            out.plain(", ");
+            out.reg(&format!("r{}", b));
+            out.comment(&format!(" pred={}", pred));
+        }
+        Instruction::I2F { dst, a } => {
+            out.op("i2f");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+        }
+        Instruction::F2I { dst, a } => {
+            out.op("f2i");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+        }
+        Instruction::U2F { dst, a } => {
+            out.op("u2f");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+        }
+        Instruction::F2U { dst, a } => {
+            out.op("f2u");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", a));
+        }
+        Instruction::Mov { dst, src } => {
+            out.op("mov");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(", ");
+            out.reg(&format!("r{}", src));
+        }
+        Instruction::FImm { dst, imm } => {
+            out.op("fimm");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(" ");
+            out.value(&format!("{:?}", imm));
+        }
+        Instruction::HostCall { id, args, results } => {
+            out.op("host.call");
+            out.plain(" ");
+            out.value(&format!("id={}", id));
+            if !args.is_empty() {
+                out.plain(" args=[");
+                for (i, a) in args.iter().enumerate() {
+                    if i > 0 {
+                        out.plain(", ");
+                    }
+                    out.reg(&format!("r{}", a));
+                }
+                out.plain("]");
+            }
+            if !results.is_empty() {
+                out.plain(" results=[");
+                for (i, r) in results.iter().enumerate() {
+                    if i > 0 {
+                        out.plain(", ");
+                    }
+                    out.reg(&format!("r{}", r));
+                }
+                out.plain("]");
+            }
+        }
+    }
+    out.writeln("");
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::e4_ser::encode_e4;
+    use crate::exec::e4::{E4Executor, E4Module};
+
+    #[test]
+    fn test_disasm_basic() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: 1.5 },
+                    Instruction::FImm { dst: 1, imm: 2.5 },
+                    Instruction::FAdd { dst: 2, a: 0, b: 1 },
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let text = decode_disasm(&encoded).unwrap();
+        assert!(text.contains("fn 0"));
+        assert!(text.contains("fimm"));
+        assert!(text.contains("fadd"));
+        assert!(text.contains("ret"));
+    }
+
+    #[test]
+    fn test_disasm_no_colors() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![Instruction::Ret { dst: 0 }],
+            }],
+            memory: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let text = decode_disasm_opts(
+            &encoded,
+            FmtOpts { colors: false, show_memory: false, hex_cols: 16 },
+        )
+        .unwrap();
+        assert!(!text.contains("\x1b["));
+        assert!(text.contains("ret"));
+    }
+
+    #[test]
+    fn test_disasm_hostcall() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: 3.14 },
+                    Instruction::HostCall { id: 0, args: vec![0], results: vec![1] },
+                    Instruction::Ret { dst: 1 },
+                ],
+            }],
+            memory: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let text = decode_disasm(&encoded).unwrap();
+        assert!(text.contains("host.call"));
+        assert!(text.contains("id=0"));
+    }
+
+    #[test]
+    fn test_disasm_fcmp() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: 1.0 },
+                    Instruction::FImm { dst: 1, imm: 2.0 },
+                    Instruction::FCmp { pred: 0, dst: 2, a: 0, b: 1 },
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let text = decode_disasm(&encoded).unwrap();
+        assert!(text.contains("fcmp"));
+        assert!(text.contains("pred=0"));
+    }
+
+    #[test]
+    fn test_disasm_memory() {
+        let module = E4Module {
+            functions: vec![],
+            memory: vec![0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE],
+        };
+        let encoded = encode_e4(&module);
+        let text = decode_disasm_opts(
+            &encoded,
+            FmtOpts { colors: false, show_memory: true, hex_cols: 4 },
+        )
+        .unwrap();
+        // Lowercase hex with spaces, 4 bytes per line
+        assert!(text.contains("de ad be ef"));
+        assert!(text.contains("ca fe"));
+    }
+}
