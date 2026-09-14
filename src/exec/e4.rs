@@ -21,6 +21,7 @@ use crate::host::HostFunctions;
 use crate::types::{ExecutionResult, Provenance};
 #[allow(unused_imports)]
 use crate::types::Status;
+use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
 // ---------------------------------------------------------------------------
@@ -28,7 +29,7 @@ use std::time::Instant;
 // ---------------------------------------------------------------------------
 
 /// E4 instruction
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instruction {
     // E1 control flow (baseline)
     Br { target: u32 },
@@ -66,7 +67,7 @@ pub enum Instruction {
 }
 
 /// E4 function definition
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct E4FunctionDef {
     pub param_count: usize,
     pub result_count: usize,
@@ -75,19 +76,10 @@ pub struct E4FunctionDef {
 }
 
 /// E4 module
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct E4Module {
     pub functions: Vec<E4FunctionDef>,
     pub memory: Vec<u8>, // 4096 bytes
-}
-
-impl Clone for E4Module {
-    fn clone(&self) -> Self {
-        Self {
-            functions: self.functions.clone(),
-            memory: self.memory.clone(),
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +87,7 @@ impl Clone for E4Module {
 // ---------------------------------------------------------------------------
 
 /// E4 register: either i32 or f32
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum E4Value {
     I32(i32),
     F32(f32),

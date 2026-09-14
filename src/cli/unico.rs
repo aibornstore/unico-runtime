@@ -5,7 +5,7 @@
 //!   unico debug <module-file> [--fuel N]
 //!   unico disasm <module-file> [--no-colors] [--show-memory]
 //!   unico encode <source-json> [--output <file>]
-//!   unico decode <module-file> [--output <file>]
+//!   unico decode <module-file> [--output <file>]  # auto-detects U30/E4
 //!   unico info <module-file>
 
 use clap::{Parser, Subcommand};
@@ -78,7 +78,7 @@ enum Commands {
         #[arg(short, long, default_value = "auto")]
         profile: String,
     },
-    /// Encode a U30 module from JSON
+    /// Encode a U30 or E4 module from JSON (auto-detects format)
     Encode {
         /// JSON source file (or - for stdin)
         #[arg(value_name = "FILE")]
@@ -88,7 +88,7 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// Decode a U30 module to JSON
+    /// Decode a U30 or E4 module to JSON (auto-detects format)
     Decode {
         /// Module file path
         #[arg(value_name = "FILE")]

@@ -21,7 +21,7 @@ pub mod verify;
 pub use e4_disasm::{decode_disasm, decode_disasm_opts, fmt_module as fmt_e4_module, FmtOpts as E4DisasmOpts};
 pub use e4_ser::{decode_e4, encode_e4};
 pub use error::{Error, Result};
-pub use exec::{E0Executor, E0Module, E1Executor, E1Module, E2Executor, E2Module, E3Executor, E3Module};
+pub use exec::{E0Executor, E0Module, E1Executor, E1Module, E2Executor, E2Module, E3Executor, E3Module, E4Executor, E4Module};
 pub use pretty::{fmt_module, fmt_module_opts, FmtOpts};
 pub use ser::{decode, encode};
 pub use debugger::{Breakpoint, U30DebugEvent, U30DebugState, U30Debugger};

@@ -1,9 +1,9 @@
-//! `unico decode` — decode a U30 module from binary to JSON
+//! `unico decode` — decode a U30 or E4 module from binary to JSON
 
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
-use unico_runtime::decode;
+use unico_runtime::{decode, decode_e4};
 
 pub fn decode_module(
     file: &Path,
@@ -16,17 +16,30 @@ pub fn decode_module(
         eprintln!("Reading {:?} ({} bytes)", file, data.len());
     }
 
-    let module = decode(&data)
-        .map_err(|e| anyhow::anyhow!("decode error: {e}"))?;
+    // Auto-detect format by magic bytes
+    let json = if data.len() >= 4 && &data[0..4] == b"E4XX" {
+        let module = decode_e4(&data)
+            .map_err(|e| anyhow::anyhow!("E4 decode error: {e}"))?;
+        if verbose {
+            eprintln!("Detected: E4 binary ({} functions, {} bytes memory)",
+                module.functions.len(), module.memory.len());
+        }
+        serde_json::to_string_pretty(&module)
+            .map_err(|e| anyhow::anyhow!("JSON serialize error: {e}"))?
+    } else {
+        let module = decode(&data)
+            .map_err(|e| anyhow::anyhow!("U30 decode error: {e}"))?;
+        if verbose {
+            eprintln!("Detected: U30 binary ({} functions, {} regions, {} tables)",
+                module.functions.len(), module.regions.len(), module.tables.len());
+        }
+        serde_json::to_string_pretty(&module)
+            .map_err(|e| anyhow::anyhow!("JSON serialize error: {e}"))?
+    };
 
     if verbose {
-        eprintln!("Module: {} functions, {} regions, {} tables",
-            module.functions.len(), module.regions.len(), module.tables.len());
+        eprintln!("JSON: {} chars", json.len());
     }
-
-    // Serialize to JSON with pretty formatting
-    let json = serde_json::to_string_pretty(&module)
-        .map_err(|e| anyhow::anyhow!("JSON serialize error: {e}"))?;
 
     // Write output
     if let Some(out) = output {
