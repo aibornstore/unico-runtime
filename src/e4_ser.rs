@@ -14,7 +14,7 @@
 //!   0x14 Mov      0x15 FImm     0x16 HostCall
 
 use crate::error::{Error, Result};
-use crate::exec::e4::{E4FunctionDef, E4Module, E4Value, Instruction};
+use crate::exec::e4::{E4FunctionDef, E4Module, Instruction};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{Read, Write};
 
@@ -506,7 +506,7 @@ fn decode_instruction_from_cursor<R: Read>(cursor: &mut R) -> Result<Instruction
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::exec::e4::{E4Executor, E4Module};
+    use crate::exec::e4::{E4Executor, E4Module, E4Value};
 
     fn roundtrip(module: &E4Module) -> E4Module {
         let bytes = encode_e4(module);
