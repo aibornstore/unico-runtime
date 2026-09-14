@@ -508,4 +508,102 @@ mod tests {
         assert!(text.contains("de ad be ef"));
         assert!(text.contains("ca fe"));
     }
+
+    // -------------------------------------------------------------------------
+    // T30: Disasm tests for missing instructions
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_disasm_all_instruction_types() {
+        // Disassemble every instruction type
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::Br { target: 5 },
+                    Instruction::BrIf { cond: 0, target: 4 },
+                    Instruction::Cmp { pred: 4, dst: 1, a: 2, b: 3 },
+                    Instruction::LoadI64 { dst: 4, addr: 5 },
+                    Instruction::StoreI64 { addr: 5, src: 4 },
+                    Instruction::FAdd { dst: 6, a: 0, b: 1 },
+                    Instruction::FSub { dst: 7, a: 0, b: 1 },
+                    Instruction::FMul { dst: 8, a: 0, b: 1 },
+                    Instruction::FDiv { dst: 9, a: 0, b: 1 },
+                    Instruction::FSqrt { dst: 10, a: 0 },
+                    Instruction::FNeg { dst: 11, a: 0 },
+                    Instruction::FAbs { dst: 12, a: 0 },
+                    Instruction::FRound { dst: 13, a: 0 },
+                    Instruction::FCmp { pred: 0, dst: 14, a: 0, b: 1 },
+                    Instruction::I2F { dst: 15, a: 0 },
+                    Instruction::F2I { dst: 15, a: 0 },
+                    Instruction::U2F { dst: 15, a: 0 },
+                    Instruction::F2U { dst: 15, a: 0 },
+                    Instruction::Mov { dst: 15, src: 0 },
+                    Instruction::FImm { dst: 0, imm: 3.14 },
+                    Instruction::HostCall { id: 0, args: vec![0], results: vec![1] },
+                    Instruction::Trap,
+                    Instruction::Ret { dst: 0 },
+                ],
+            }],
+            memory: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let text = decode_disasm(&encoded).unwrap();
+        assert!(text.contains("br "));
+        assert!(text.contains("br.if"));
+        assert!(text.contains("cmp "));
+        assert!(text.contains("load.i64 "));
+        assert!(text.contains("store.i64 "));
+        assert!(text.contains("fadd "));
+        assert!(text.contains("fsub "));
+        assert!(text.contains("fmul "));
+        assert!(text.contains("fdiv "));
+        assert!(text.contains("fsqrt "));
+        assert!(text.contains("fneg "));
+        assert!(text.contains("fabs "));
+        assert!(text.contains("fround "));
+        assert!(text.contains("fcmp "));
+        assert!(text.contains("i2f "));
+        assert!(text.contains("f2i "));
+        assert!(text.contains("u2f "));
+        assert!(text.contains("f2u "));
+        assert!(text.contains("mov "));
+        assert!(text.contains("fimm "));
+        assert!(text.contains("host.call"));
+        assert!(text.contains("trap"));
+        assert!(text.contains("ret "));
+    }
+
+    #[test]
+    fn test_disasm_multiple_functions() {
+        // Disassemble module with multiple functions
+        let module = E4Module {
+            functions: vec![
+                E4FunctionDef {
+                    param_count: 0,
+                    result_count: 1,
+                    register_count: 2,
+                    code: vec![
+                        Instruction::FImm { dst: 0, imm: 1.0 },
+                        Instruction::Ret { dst: 0 },
+                    ],
+                },
+                E4FunctionDef {
+                    param_count: 1,
+                    result_count: 0,
+                    register_count: 2,
+                    code: vec![Instruction::Trap],
+                },
+            ],
+            memory: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let text = decode_disasm(&encoded).unwrap();
+        assert!(text.contains("fn 0"));
+        assert!(text.contains("fn 1"));
+        assert!(text.contains("params=0"));
+        assert!(text.contains("params=1"));
+    }
 }

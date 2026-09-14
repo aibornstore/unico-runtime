@@ -94,14 +94,14 @@ pub enum E4Value {
 }
 
 impl E4Value {
-    fn as_i32(&self) -> Result<i32> {
+    pub(crate) fn as_i32(&self) -> Result<i32> {
         match self {
             Self::I32(v) => Ok(*v),
             _ => Err(Error::Generic("E4: expected i32".into())),
         }
     }
 
-    fn as_f32(&self) -> Result<f32> {
+    pub(crate) fn as_f32(&self) -> Result<f32> {
         match self {
             Self::F32(v) => Ok(*v),
             _ => Err(Error::Generic("E4: expected f32".into())),
@@ -363,6 +363,18 @@ mod tests {
                 code,
             }],
             memory: vec![0u8; 4096],
+        }
+    }
+
+    fn make_module_with_memory(code: Vec<Instruction>, memory_size: usize) -> E4Module {
+        E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code,
+            }],
+            memory: vec![0u8; memory_size],
         }
     }
 
@@ -707,5 +719,197 @@ mod tests {
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.status, Status::Pass);
         assert_eq!(result.provenance.host_calls, 2);
+    }
+
+    // -------------------------------------------------------------------------
+    // Missing instruction tests (T30)
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_e4_br() {
+        // Unconditional branch: Br jumps to Ret, skipping the trap
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::Br { target: 3 }, // jump to Ret (pc=3)
+            Instruction::Trap,             // skipped
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u32;
+        assert!((f32::from_bits(bits) - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_e4_brif_taken() {
+        // BrIf taken: Cmp with pred=3 (>=) on r0,r1 (both 0) gives r2=1
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 3, dst: 2, a: 0, b: 1 }, // r2 = 1 (0>=0 = true)
+            Instruction::BrIf { cond: 2, target: 3 },          // taken → skip Trap
+            Instruction::Trap,
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u32;
+        assert!((f32::from_bits(bits) - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_e4_brif_not_taken() {
+        // BrIf not taken: falls through to Trap (NOT taken → pc=2 = Trap)
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 1, dst: 2, a: 0, b: 1 }, // r2 = 0 (0!=0 = false)
+            Instruction::BrIf { cond: 2, target: 3 },          // not taken → pc=2
+            Instruction::Trap,                                   // pc=2: Trap
+            Instruction::Ret { dst: 2 },                        // pc=3: Ret (skipped if taken)
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail, "should hit trap");
+    }
+
+    #[test]
+    fn test_e4_cmp_eq() {
+        // Cmp pred=4: equal
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 3.0 },
+            Instruction::FImm { dst: 1, imm: 3.0 },
+            Instruction::FCmp { pred: 4, dst: 2, a: 0, b: 1 }, // 3.0 == 3.0 = 1
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.value.unwrap(), 1);
+    }
+
+    #[test]
+    fn test_e4_load_store_i64() {
+        // LoadI64/StoreI64: store i32 to memory, load back
+        // Cmp writes to r2 (not r0) so r0 stays as initial I32(0)
+        let mut exec = E4Executor::default();
+        let module = make_module_with_memory(vec![
+            Instruction::Cmp { pred: 0, dst: 2, a: 0, b: 0 }, // r2 = 1, r0 stays I32(0)
+            Instruction::StoreI64 { addr: 8, src: 0 },           // store r0 (I32=0) at addr 8
+            Instruction::LoadI64 { dst: 1, addr: 8 },           // load from addr 8 → I32(0)
+            Instruction::Ret { dst: 1 },
+        ], 256);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 0); // stored 0, loaded 0
+    }
+
+    #[test]
+    fn test_e4_f2i_truncates() {
+        // F2I: f32 → i32 (truncates fractional part)
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 3.9 }, // 3.9
+            Instruction::F2I { dst: 1, a: 0 }, // truncates to 3
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        // The f32 bits 0x4079999A represent 3.9, F2I truncates → 3
+        assert_eq!(result.value.unwrap(), 3);
+    }
+
+    #[test]
+    fn test_e4_f2u_truncates() {
+        // F2U: f32 → u32 (truncates, rejects negative)
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 3.9 }, // 3.9
+            Instruction::F2U { dst: 1, a: 0 }, // truncates to 3
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 3);
+    }
+
+    #[test]
+    fn test_e4_register_count_enough() {
+        // Execution succeeds when register_count >= highest used register
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 7, imm: 1.0 }, // use register 7
+            Instruction::Ret { dst: 7 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u32;
+        assert!((f32::from_bits(bits) - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_e4_multiple_host_functions() {
+        // Register multiple host functions, call them by index
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(10));
+        exec.host_functions_mut().register(|_args| E4Value::I32(20));
+        exec.host_functions_mut().register(|_args| E4Value::I32(30));
+        let module = make_module(vec![
+            Instruction::HostCall { id: 1, args: vec![], results: vec![0] }, // returns 20
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 20);
+        assert_eq!(result.provenance.host_calls, 1);
+    }
+
+    #[test]
+    fn test_e4_mixed_host_and_float() {
+        // Mix HostCall and float ops
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(5));
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 2.0 },
+            Instruction::HostCall { id: 0, args: vec![], results: vec![1] }, // r1 = 5
+            Instruction::FImm { dst: 2, imm: 3.0 }, // r2 = 3.0
+            Instruction::FAdd { dst: 3, a: 0, b: 2 }, // r3 = 5.0
+            Instruction::Ret { dst: 3 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u32;
+        assert!((f32::from_bits(bits) - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_e4_rexecute_reuses_registers() {
+        // Re-executing the same module resets registers
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 7.0 },
+            Instruction::Ret { dst: 0 },
+        ]);
+        let r1 = exec.execute(&module, 0).unwrap();
+        let r2 = exec.execute(&module, 0).unwrap(); // execute again
+        let bits1 = r1.value.unwrap() as u32;
+        let bits2 = r2.value.unwrap() as u32;
+        assert!((f32::from_bits(bits1) - 7.0).abs() < 0.001);
+        assert!((f32::from_bits(bits2) - 7.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_e4_empty_code() {
+        // Function with empty code fails
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![],
+            }],
+            memory: vec![0u8; 256],
+        };
+        let mut exec = E4Executor::default();
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
     }
 }

@@ -654,4 +654,109 @@ mod tests {
         assert_eq!(decoded.functions[1].param_count, 0);
         assert_eq!(decoded.memory, vec![0xDE, 0xAD, 0xBE, 0xEF]);
     }
+
+    // -------------------------------------------------------------------------
+    // T30: Additional serialization edge cases
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_e4_encode_decode_empty_memory() {
+        // Zero-sized memory should roundtrip
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 2,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: 1.0 },
+                    Instruction::Ret { dst: 0 },
+                ],
+            }],
+            memory: vec![],
+        };
+        let decoded = roundtrip(&module);
+        assert!(decoded.memory.is_empty());
+    }
+
+    #[test]
+    fn test_e4_encode_decode_large_immediate() {
+        // FImm with large f32 value: 1e30 = 0x72A11E2E
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 2,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: 1e30_f32 },
+                    Instruction::Ret { dst: 0 },
+                ],
+            }],
+            memory: vec![0u8; 64],
+        };
+        let decoded = roundtrip(&module);
+        let mut exec = E4Executor::default();
+        let result = exec.execute(&decoded, 0).unwrap();
+        assert_eq!(result.status, crate::types::Status::Pass);
+        let bits = result.value.unwrap() as u32;
+        assert_eq!(bits, 1e30_f32.to_bits());
+    }
+
+    #[test]
+    fn test_e4_encode_decode_special_floats() {
+        // Encode/decode NaN and -0.0. NaN != anything (pred=5), -0.0 == -0.0 (pred=4)
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 3,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: f32::NAN },
+                    Instruction::FImm { dst: 1, imm: -0.0_f32 },
+                    Instruction::FCmp { pred: 5, dst: 2, a: 0, b: 1 }, // NaN != -0.0
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![0u8; 64],
+        };
+        let decoded = roundtrip(&module);
+        let mut exec = E4Executor::default();
+        let result = exec.execute(&decoded, 0).unwrap();
+        assert_eq!(result.status, crate::types::Status::Pass);
+        assert_eq!(result.value.unwrap(), 1); // NaN != -0.0
+    }
+
+    #[test]
+    fn test_e4_encode_decode_hostcall_with_args_and_results() {
+        // HostCall with multiple args: host extracts f32 bits, returns first arg's bits
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|args| {
+            let first_bits = match &args[0] {
+                E4Value::F32(f) => f.to_bits() as i64,
+                E4Value::I32(i) => *i as i64,
+            };
+            E4Value::I32(first_bits as i32)
+        });
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: 10.0 }, // bits = 0x41200000
+                    Instruction::FImm { dst: 1, imm: 20.0 }, // bits = 0x41A00000
+                    Instruction::HostCall {
+                        id: 0,
+                        args: vec![0, 1],
+                        results: vec![2, 3],
+                    },
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![0u8; 64],
+        };
+        let decoded = roundtrip(&module);
+        let result = exec.execute(&decoded, 0).unwrap();
+        assert_eq!(result.status, crate::types::Status::Pass);
+        assert_eq!(result.value.unwrap(), 0x41200000_i64); // 10.0 bits
+    }
 }
