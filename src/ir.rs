@@ -240,6 +240,7 @@ pub enum U30Op {
     ByteSwapU32 { dst: u32, src: u32 },
     ByteSwapU64 { dst: u32, src: u32 },
     Call { function: u32, args: Vec<u32>, results: Vec<u32> },
+    IndirectCall { function: u32, args: Vec<u32>, results: Vec<u32> },
     TableBr { table: u32, index: u32 },
     Break { code: u32 },
     Assert { cond: u32, msg: u32 },
@@ -423,6 +424,7 @@ impl U30Module {
                     | U30Op::MemCopy { .. }
                     | U30Op::MemFill { .. }
                     | U30Op::Call { .. }
+                    | U30Op::IndirectCall { .. }
                     | U30Op::TableBr { .. }
                     | U30Op::Break { .. }
                     | U30Op::Assert { .. }
@@ -671,6 +673,20 @@ impl U30Module {
                             defined.insert(*r);
                         }
                     }
+                    U30Op::IndirectCall { function, args, results } => {
+                        // function is a register holding the function index
+                        if !defined.contains(function) {
+                            return Err(Error::Verification(format!("U30X undefined function register")));
+                        }
+                        for r in args {
+                            if !defined.contains(r) {
+                                return Err(Error::Verification(format!("U30X undefined arg")));
+                            }
+                        }
+                        for r in results {
+                            defined.insert(*r);
+                        }
+                    }
                     U30Op::TableBr { table, index } => {
                         if !table_ids.contains(table) {
                             return Err(Error::Verification(format!("U30X unknown table {}", table)));
@@ -732,7 +748,7 @@ impl U30Module {
                     return Err(Error::Verification(format!("U30X fn {fn_index} block {block_index}: bad result arity")));
                 }
             }
-            U30Terminator::TailCall { function: fn_idx, args } => {
+            U30Terminator::TailCall { function: _fn_idx, args } => {
                 // Args must be defined
                 for r in args {
                     if !defined.contains(r) {

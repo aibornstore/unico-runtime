@@ -66,7 +66,7 @@ impl U30Runtime {
         let mut call_stack: Vec<(usize, usize, Vec<u32>, BTreeMap<u32, U30Value>, BTreeMap<u32, U30Value>, usize)> = Vec::new();
         // Resume op index: after returning from a call, skip past the Call op itself
         let mut resume_from_op: Option<usize> = None;
-        let mut last_op_idx: usize = 0;
+        let mut last_op_idx: usize;
 
         'outer: loop {
             let block = &module.functions[function_idx].blocks[block_index];
@@ -76,9 +76,34 @@ impl U30Runtime {
                 last_op_idx = op_idx;
                 self.charge(&mut steps)?;
                 match op {
-                    U30Op::Call { function: fn_reg, args, results: result_regs } => {
-                        // Read function index from register
+                    U30Op::IndirectCall { function: fn_reg, args, results: result_regs } => {
+                        // Read function index from register (dynamic dispatch)
                         let fn_idx = self.reg(&regs, *fn_reg)?.as_u64()? as usize;
+                        if fn_idx >= module.functions.len() {
+                            return Err(Error::Generic(format!("U30X indirect call: function index {} out of bounds", fn_idx)));
+                        }
+                        // Save caller state (before Call modifies regs)
+                        let caller_regs = regs.clone();
+                        let callee_regs = BTreeMap::new();
+                        let caller_last_op_idx = last_op_idx;
+                        call_stack.push((current_fn_idx, block_index, result_regs.clone(), caller_regs, callee_regs, caller_last_op_idx));
+                        // Set up callee registers from args
+                        regs = BTreeMap::new();
+                        for (i, &arg_reg) in args.iter().enumerate() {
+                            if i < module.functions[fn_idx].params.len() {
+                                let arg_val = self.reg(&call_stack.last().unwrap().3, arg_reg)?.clone();
+                                regs.insert(i as u32, arg_val);
+                            }
+                        }
+                        // Jump to callee entry
+                        current_fn_idx = fn_idx;
+                        function_idx = fn_idx;
+                        block_index = module.functions[fn_idx].entry_block;
+                        continue 'outer;
+                    }
+                    U30Op::Call { function: fn_idx_lit, args, results: result_regs } => {
+                        // Use literal function index directly (Call uses a literal index, not a register)
+                        let fn_idx = *fn_idx_lit as usize;
                         if fn_idx >= module.functions.len() {
                             return Err(Error::Generic(format!("U30X call: function index {} out of bounds", fn_idx)));
                         }
@@ -682,6 +707,9 @@ impl U30Runtime {
             U30Op::Nop => {}
             U30Op::Call { .. } => {
                 // Call is handled in the main execution loop, not here
+            }
+            U30Op::IndirectCall { .. } => {
+                // IndirectCall is handled in the main execution loop, not here
             }
             U30Op::TableBr { .. } => {
                 // TableBr is handled in the main execution loop, not here
@@ -2401,8 +2429,7 @@ mod tests {
             blocks: vec![U30Block {
                 ops: vec![
                     U30Op::Const { dst: 0, value: U30Value::U64(41) },
-                    U30Op::Const { dst: 1, value: U30Value::U64(0) }, // fn_idx = add_one
-                    U30Op::Call { function: 1, args: vec![0], results: vec![2] },
+                    U30Op::Call { function: 0, args: vec![0], results: vec![2] }, // call add_one (fn 0)
                 ],
                 terminator: U30Terminator::Ret { values: vec![2] },
             }],
@@ -2443,8 +2470,7 @@ mod tests {
                 ops: vec![
                     U30Op::Const { dst: 1, value: U30Value::U64(1) },
                     U30Op::Binary { dst: 2, op: U30BinaryOp::AddWrapU64, a: 0, b: 1 }, // r2 = x + 1
-                    U30Op::Const { dst: 3, value: U30Value::U64(0) }, // fn_idx = add_one
-                    U30Op::Call { function: 3, args: vec![2], results: vec![4] },
+                    U30Op::Call { function: 0, args: vec![2], results: vec![4] }, // call add_one (fn 0)
                 ],
                 terminator: U30Terminator::Ret { values: vec![4] },
             }],
@@ -2460,8 +2486,7 @@ mod tests {
                     U30Op::Const { dst: 0, value: U30Value::U64(10) }, // r0 = 10
                     U30Op::Const { dst: 1, value: U30Value::U64(2) },  // r1 = 2
                     U30Op::Binary { dst: 2, op: U30BinaryOp::MulWrapU64, a: 0, b: 1 }, // r2 = 20
-                    U30Op::Const { dst: 3, value: U30Value::U64(1) },  // fn_idx = helper
-                    U30Op::Call { function: 3, args: vec![2], results: vec![4] },
+                    U30Op::Call { function: 1, args: vec![2], results: vec![4] }, // call helper (fn 1)
                 ],
                 terminator: U30Terminator::Ret { values: vec![4] },
             }],
@@ -2848,8 +2873,7 @@ mod tests {
                 ops: vec![
                     U30Op::Const { dst: 0, value: U30Value::U64(10) }, // r0 = 10
                     U30Op::Const { dst: 1, value: U30Value::U64(3) },  // r1 = 3
-                    U30Op::Const { dst: 2, value: U30Value::U64(0) },  // fn_idx = max_fn
-                    U30Op::Call { function: 2, args: vec![0, 1], results: vec![3] },
+                    U30Op::Call { function: 0, args: vec![0, 1], results: vec![3] }, // call max_fn (fn 0)
                 ],
                 terminator: U30Terminator::Ret { values: vec![3] },
             }],
@@ -2914,17 +2938,13 @@ mod tests {
                     U30Op::Const { dst: 2, value: U30Value::U64(2) }, // r2 = 2
                     U30Op::Const { dst: 3, value: U30Value::U64(3) }, // r3 = 3
                     // call dispatch(0) -> r4
-                    U30Op::Const { dst: 100, value: U30Value::U64(0) }, // fn_idx = dispatch
-                    U30Op::Call { function: 100, args: vec![0], results: vec![4] },
+                    U30Op::Call { function: 0, args: vec![0], results: vec![4] }, // dispatch_fn is fn 0
                     // call dispatch(1) -> r5
-                    U30Op::Const { dst: 101, value: U30Value::U64(0) },
-                    U30Op::Call { function: 101, args: vec![1], results: vec![5] },
+                    U30Op::Call { function: 0, args: vec![1], results: vec![5] },
                     // call dispatch(2) -> r6
-                    U30Op::Const { dst: 102, value: U30Value::U64(0) },
-                    U30Op::Call { function: 102, args: vec![2], results: vec![6] },
+                    U30Op::Call { function: 0, args: vec![2], results: vec![6] },
                     // call dispatch(3) -> r7
-                    U30Op::Const { dst: 103, value: U30Value::U64(0) },
-                    U30Op::Call { function: 103, args: vec![3], results: vec![7] },
+                    U30Op::Call { function: 0, args: vec![3], results: vec![7] },
                     // r8 = r4 + r5
                     U30Op::Binary { dst: 8, op: U30BinaryOp::AddWrapU64, a: 4, b: 5 },
                     // r9 = r8 + r6
@@ -2946,5 +2966,274 @@ mod tests {
         };
         let out = U30Runtime::default().execute_experimental(&module, &[]).expect("ok");
         assert_eq!(out.results[0].as_u64().unwrap(), 100); // 10+20+30+40
+    }
+
+    #[test]
+    fn u30x_recursive_factorial() {
+        // Recursive factorial: fact(n, acc) -> if n==0 { return acc } else { fact(n-1, acc*n) }
+        // Block 2: compute n-1 → r0, acc*n → r1, then jump to block 3
+        // Block 3: Call fact(r0, r1) — result lands in r5, Ret returns r5
+        let fact_fn = U30Function {
+            params: vec![U30Type::U64, U30Type::U64], // r0=n, r1=acc
+            results: vec![U30Type::U64],
+            blocks: vec![
+                // Block 0: check n == 0 (base case)
+                U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 2, value: U30Value::U64(0) }, // r2 = 0
+                        U30Op::Binary { dst: 3, op: U30BinaryOp::Eq, a: 0, b: 2 }, // r3 = n == 0
+                    ],
+                    // r3: true → block 1 (return acc), false → block 2 (recurse)
+                    terminator: U30Terminator::BrIf { cond: 3, then_target: 1, else_target: 2 },
+                },
+                // Block 1: base case — return acc (r1)
+                U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                },
+                // Block 2: compute n-1 → r0, acc*n → r1, jump to block 3 for Call
+                U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 2, value: U30Value::U64(1) },  // r2 = 1
+                        U30Op::Binary { dst: 3, op: U30BinaryOp::MulWrapU64, a: 0, b: 2 }, // r3 = n * 1 = n
+                        U30Op::Binary { dst: 4, op: U30BinaryOp::MulWrapU64, a: 1, b: 2 }, // r4 = acc * 1 = acc
+                        U30Op::Binary { dst: 0, op: U30BinaryOp::SubWrapU64, a: 3, b: 2 }, // r0 = n - 1
+                        U30Op::Binary { dst: 1, op: U30BinaryOp::MulWrapU64, a: 4, b: 3 }, // r1 = acc * n
+                    ],
+                    terminator: U30Terminator::Br { target: 3 },
+                },
+                // Block 3: Call fact(n-1, acc*n) — args r0/r1, result → r5, return r5
+                U30Block {
+                    ops: vec![
+                        U30Op::Call { function: 0, args: vec![0, 1], results: vec![5] },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![5] },
+                },
+            ],
+            entry_block: 0,
+        };
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![fact_fn],
+            entry_function: 0,
+        };
+        let runtime = U30Runtime { fuel_limit: 500_000 };
+        // fact(0, 1) = 1
+        let result = runtime.execute_experimental(&module, &[U30Value::U64(0), U30Value::U64(1)]);
+        assert!(result.is_ok(), "fact(0,1) failed: {:?}", result);
+        assert_eq!(result.as_ref().unwrap().results[0], U30Value::U64(1), "fact(0,1)=1");
+        // fact(5, 1) = 120
+        let result = runtime.execute_experimental(&module, &[U30Value::U64(5), U30Value::U64(1)]);
+        assert!(result.is_ok(), "fact(5,1) failed: {:?}", result);
+        assert_eq!(result.as_ref().unwrap().results[0], U30Value::U64(120), "fact(5,1)=120");
+    }
+
+    #[test]
+    fn u30x_f64_nan_inequality() {
+        // NaN != NaN by IEEE 754 spec
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(f64::NAN) }, // r0 = NaN
+                        U30Op::Const { dst: 1, value: U30Value::F64(f64::NAN) }, // r1 = NaN
+                        U30Op::F64Eq { dst: 2, a: 0, b: 1 }, // r2 = NaN == NaN (should be false)
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).expect("ok");
+        assert_eq!(out.results[0], U30Value::Bool(false), "NaN != NaN");
+    }
+
+    #[test]
+    fn u30x_f64_div_by_zero() {
+        // Division by zero returns an error
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(0.0) },
+                        U30Op::F64Div { dst: 2, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default().execute_experimental(&module, &[]).expect_err("div by zero");
+        assert!(err.to_string().contains("div-by-zero"), "expected div-by-zero error: {}", err);
+    }
+
+    #[test]
+    fn u30x_break_returns_error() {
+        // Break { code } returns an error with the code
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::Break { code: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default().execute_experimental(&module, &[]).expect_err("break");
+        assert!(err.to_string().contains("break 42"), "expected 'break 42': {}", err);
+    }
+
+    #[test]
+    fn u30x_assert_false_fails() {
+        // Assert { cond: false } returns an error
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(false) },
+                        U30Op::Assert { cond: 0, msg: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default().execute_experimental(&module, &[]).expect_err("assert should fail");
+        assert!(err.to_string().contains("assertion failed"), "expected assertion failed: {}", err);
+    }
+
+    #[test]
+    fn u30x_memgrow_basic() {
+        // MemGrow: grow a region by 4 bytes, returns old size
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 4, readable: true, writable: true, initial: vec![1, 2, 3, 4],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(4) }, // delta = 4
+                        U30Op::MemGrow { dst: 1, region: 0, delta: 0 }, // returns old size = 4
+                        U30Op::Const { dst: 2, value: U30Value::U64(4) }, // verify delta read from r0=4
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] }, // returns old_size = 4
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).expect("ok");
+        assert_eq!(out.results[0], U30Value::U64(4), "mem_grow returns old size");
+        // After grow, region should be 8 bytes
+        assert_eq!(out.regions[&0].len(), 8, "region grew from 4 to 8 bytes");
+    }
+
+    #[test]
+    fn u30x_memgrow_zero_delta() {
+        // MemGrow with delta=0: returns current size, no change
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 10, readable: true, writable: true, initial: vec![],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) }, // delta = 0
+                        U30Op::MemGrow { dst: 1, region: 0, delta: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] }, // returns old_size = 10
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).expect("ok");
+        assert_eq!(out.results[0], U30Value::U64(10), "mem_grow(0) returns current size");
+        assert_eq!(out.regions[&0].len(), 10, "no change");
+    }
+
+    #[test]
+    fn u30x_indirect_call() {
+        // Function 0: double(x: U64) -> U64
+        // Function 1: triple(x: U64) -> U64
+        // Function 2: main — uses IndirectCall to dispatch to double or triple
+        let double_fn = U30Function {
+            params: vec![U30Type::U64],
+            results: vec![U30Type::U64],
+            blocks: vec![U30Block {
+                ops: vec![
+                    U30Op::Const { dst: 1, value: U30Value::U64(2) },
+                    U30Op::Binary { dst: 0, op: U30BinaryOp::MulWrapU64, a: 0, b: 1 },
+                ],
+                terminator: U30Terminator::Ret { values: vec![0] },
+            }],
+            entry_block: 0,
+        };
+        let triple_fn = U30Function {
+            params: vec![U30Type::U64],
+            results: vec![U30Type::U64],
+            blocks: vec![U30Block {
+                ops: vec![
+                    U30Op::Const { dst: 1, value: U30Value::U64(3) },
+                    U30Op::Binary { dst: 0, op: U30BinaryOp::MulWrapU64, a: 0, b: 1 },
+                ],
+                terminator: U30Terminator::Ret { values: vec![0] },
+            }],
+            entry_block: 0,
+        };
+        // main: set fn_idx to 0 or 1, then IndirectCall
+        // result = indirect_call(fn_idx, 5) → 10 (double) or 15 (triple)
+        let main_fn = U30Function {
+            params: vec![],
+            results: vec![U30Type::U64],
+            blocks: vec![U30Block {
+                ops: vec![
+                    U30Op::Const { dst: 0, value: U30Value::U64(0) }, // r0 = 0 (double)
+                    U30Op::Const { dst: 1, value: U30Value::U64(5) }, // r1 = 5 (arg)
+                    U30Op::IndirectCall { function: 0, args: vec![1], results: vec![2] },
+                ],
+                terminator: U30Terminator::Ret { values: vec![2] },
+            }],
+            entry_block: 0,
+        };
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![double_fn, triple_fn, main_fn],
+            entry_function: 2,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).expect("ok");
+        assert_eq!(out.results[0], U30Value::U64(10), "indirect call to double(5) = 10");
     }
 }
