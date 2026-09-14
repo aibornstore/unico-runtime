@@ -61,6 +61,25 @@ pub enum Instruction {
     Mov { dst: u32, src: u32 },
     // E4 immediate (f32)
     FImm { dst: u32, imm: f32 },
+    // E4 f64 floating-point binary
+    FAddF64 { dst: u32, a: u32, b: u32 },
+    FSubF64 { dst: u32, a: u32, b: u32 },
+    FMulF64 { dst: u32, a: u32, b: u32 },
+    FDivF64 { dst: u32, a: u32, b: u32 },
+    // E4 f64 unary (same ops work on both f32/f64 via as_f64)
+    FSqrtF64 { dst: u32, a: u32 },
+    FNegF64 { dst: u32, a: u32 },
+    FAbsF64 { dst: u32, a: u32 },
+    FRoundF64 { dst: u32, a: u32 },
+    // E4 f64 comparison
+    FCmpF64 { pred: u8, dst: u32, a: u32, b: u32 },
+    // E4 type conversions
+    I2F64 { dst: u32, a: u32 },  // i32 → f64
+    F642I { dst: u32, a: u32 },  // f64 → i32 (truncates)
+    U2F64 { dst: u32, a: u32 },  // u32 → f64
+    F642U { dst: u32, a: u32 },  // f64 → u32 (truncates)
+    // E4 f64 immediate
+    FImmF64 { dst: u32, imm: f64 },
     // E4 host boundary v2: call a host function
     // id = host function index, args = register indices, results = register indices
     HostCall { id: u32, args: Vec<u32>, results: Vec<u32> },
@@ -86,11 +105,12 @@ pub struct E4Module {
 // E4 register
 // ---------------------------------------------------------------------------
 
-/// E4 register: either i32 or f32
+/// E4 register: i32, f32, or f64
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum E4Value {
     I32(i32),
     F32(f32),
+    F64(f64),
 }
 
 impl E4Value {
@@ -104,7 +124,16 @@ impl E4Value {
     pub(crate) fn as_f32(&self) -> Result<f32> {
         match self {
             Self::F32(v) => Ok(*v),
+            Self::F64(v) => Ok(*v as f32),
             _ => Err(Error::Generic("E4: expected f32".into())),
+        }
+    }
+
+    pub(crate) fn as_f64(&self) -> Result<f64> {
+        match self {
+            Self::F64(v) => Ok(*v),
+            Self::F32(v) => Ok(*v as f64),
+            _ => Err(Error::Generic("E4: expected f64".into())),
         }
     }
 
@@ -185,6 +214,7 @@ impl E4Executor {
                     let val = match regs[*dst as usize] {
                         E4Value::I32(v) => v as i64,
                         E4Value::F32(v) => v.to_bits() as i64,
+                        E4Value::F64(v) => v.to_bits() as i64,
                     };
                     return Ok(ExecutionResult::pass(val, self.provenance()));
                 }
@@ -317,6 +347,96 @@ impl E4Executor {
                 }
                 Instruction::FImm { dst, imm } => {
                     regs[*dst as usize] = E4Value::F32(*imm);
+                    pc += 1;
+                }
+                // ---- E4 f64 floating-point binary ----
+                Instruction::FAddF64 { dst, a, b } => {
+                    let a = regs[*a as usize].as_f64()?;
+                    let b = regs[*b as usize].as_f64()?;
+                    regs[*dst as usize] = E4Value::F64(a + b);
+                    pc += 1;
+                }
+                Instruction::FSubF64 { dst, a, b } => {
+                    let a = regs[*a as usize].as_f64()?;
+                    let b = regs[*b as usize].as_f64()?;
+                    regs[*dst as usize] = E4Value::F64(a - b);
+                    pc += 1;
+                }
+                Instruction::FMulF64 { dst, a, b } => {
+                    let a = regs[*a as usize].as_f64()?;
+                    let b = regs[*b as usize].as_f64()?;
+                    regs[*dst as usize] = E4Value::F64(a * b);
+                    pc += 1;
+                }
+                Instruction::FDivF64 { dst, a, b } => {
+                    let a = regs[*a as usize].as_f64()?;
+                    let b = regs[*b as usize].as_f64()?;
+                    regs[*dst as usize] = E4Value::F64(a / b);
+                    pc += 1;
+                }
+                Instruction::FSqrtF64 { dst, a } => {
+                    let a = regs[*a as usize].as_f64()?;
+                    regs[*dst as usize] = E4Value::F64(a.sqrt());
+                    pc += 1;
+                }
+                Instruction::FNegF64 { dst, a } => {
+                    let a = regs[*a as usize].as_f64()?;
+                    regs[*dst as usize] = E4Value::F64(-a);
+                    pc += 1;
+                }
+                Instruction::FAbsF64 { dst, a } => {
+                    let a = regs[*a as usize].as_f64()?;
+                    regs[*dst as usize] = E4Value::F64(a.abs());
+                    pc += 1;
+                }
+                Instruction::FRoundF64 { dst, a } => {
+                    let a = regs[*a as usize].as_f64()?;
+                    regs[*dst as usize] = E4Value::F64(a.round());
+                    pc += 1;
+                }
+                Instruction::FCmpF64 { pred, dst, a, b } => {
+                    let a = regs[*a as usize].as_f64()?;
+                    let b = regs[*b as usize].as_f64()?;
+                    let r = match pred {
+                        0 => a < b,
+                        1 => a <= b,
+                        2 => a > b,
+                        3 => a >= b,
+                        4 => a == b,
+                        5 => a != b,
+                        _ => return Err(Error::Generic(format!("E4: unknown fcmp.f64 pred {pred}"))),
+                    };
+                    regs[*dst as usize] = E4Value::I32(if r { 1 } else { 0 });
+                    pc += 1;
+                }
+                Instruction::I2F64 { dst, a } => {
+                    let a = regs[*a as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::F64(a as f64);
+                    pc += 1;
+                }
+                Instruction::F642I { dst, a } => {
+                    let a = regs[*a as usize].as_f64()?;
+                    if a.is_nan() || a < (i32::MIN as f64) || a > (i32::MAX as f64) {
+                        return Ok(ExecutionResult::fail("E4: f64→i32 conversion error".into(), self.provenance()));
+                    }
+                    regs[*dst as usize] = E4Value::I32(a as i32);
+                    pc += 1;
+                }
+                Instruction::U2F64 { dst, a } => {
+                    let a = regs[*a as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::F64((a as u32) as f64);
+                    pc += 1;
+                }
+                Instruction::F642U { dst, a } => {
+                    let a = regs[*a as usize].as_f64()?;
+                    if a.is_nan() || a < 0.0 || a > (u32::MAX as f64) {
+                        return Ok(ExecutionResult::fail("E4: f64→u32 conversion error".into(), self.provenance()));
+                    }
+                    regs[*dst as usize] = E4Value::I32((a as u32) as i32);
+                    pc += 1;
+                }
+                Instruction::FImmF64 { dst, imm } => {
+                    regs[*dst as usize] = E4Value::F64(*imm);
                     pc += 1;
                 }
                 Instruction::HostCall { id, args, results } => {
@@ -911,5 +1031,74 @@ mod tests {
         let mut exec = E4Executor::default();
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.status, Status::Fail);
+    }
+
+    #[test]
+    fn test_e4_f64_fimm() {
+        // FImmF64: load f64 immediate
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::FImmF64 { dst: 0, imm: 3.14159265358979 }, // pi
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        // Result is f64 bits as i64
+        let val = result.value.unwrap();
+        let pi_bits = 3.14159265358979_f64.to_bits() as i64;
+        assert_eq!(val, pi_bits);
+    }
+
+    #[test]
+    fn test_e4_f64_arithmetic() {
+        // FAddF64, FMulF64: f64 arithmetic
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::FImmF64 { dst: 0, imm: 2.0 },
+            Instruction::FImmF64 { dst: 1, imm: 3.0 },
+            Instruction::FAddF64 { dst: 2, a: 0, b: 1 }, // r2 = 5.0
+            Instruction::FMulF64 { dst: 3, a: 2, b: 1 }, // r3 = 15.0
+            Instruction::Ret { dst: 3 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let val = result.value.unwrap() as u64;
+        let expected = 15.0_f64.to_bits();
+        assert_eq!(val, expected);
+    }
+
+    #[test]
+    fn test_e4_f64_sqrt() {
+        // FSqrtF64: f64 square root
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::FImmF64 { dst: 0, imm: 16.0 },
+            Instruction::FSqrtF64 { dst: 1, a: 0 }, // r1 = 4.0
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let val = result.value.unwrap() as u64;
+        let expected = 4.0_f64.to_bits();
+        assert_eq!(val, expected);
+    }
+
+    #[test]
+    fn test_e4_f64_conversion() {
+        // I2F64 and F642I: i32 <-> f64 conversion
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = make_module(vec![
+            Instruction::I2F64 { dst: 0, a: 0 }, // r0=0 -> f64(0)
+            Instruction::FImmF64 { dst: 1, imm: 3.7 }, // r1 = 3.7
+            Instruction::F642I { dst: 2, a: 1 }, // r2 = f64(3.7) -> i32(3)
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 3);
     }
 }

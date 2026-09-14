@@ -231,6 +231,25 @@ fn build_e4_module(code: Vec<E4Instr>) -> E4Module {
     }
 }
 
+/// E4 module with F64 arithmetic: 10 fadd.f64 operations + ret.
+fn build_e4_f64_module() -> E4Module {
+    let code = vec![
+        E4Instr::FImmF64 { dst: 0, imm: 1.0 },
+        E4Instr::FImmF64 { dst: 1, imm: 2.0 },
+        E4Instr::FAddF64 { dst: 2, a: 0, b: 1 },
+        E4Instr::FAddF64 { dst: 2, a: 2, b: 1 },
+        E4Instr::FAddF64 { dst: 2, a: 2, b: 1 },
+        E4Instr::FAddF64 { dst: 2, a: 2, b: 1 },
+        E4Instr::FAddF64 { dst: 2, a: 2, b: 1 },
+        E4Instr::FAddF64 { dst: 2, a: 2, b: 1 },
+        E4Instr::FAddF64 { dst: 2, a: 2, b: 1 },
+        E4Instr::FAddF64 { dst: 2, a: 2, b: 1 },
+        E4Instr::FAddF64 { dst: 2, a: 2, b: 1 },
+        E4Instr::Ret { dst: 2 },
+    ];
+    build_e4_module(code)
+}
+
 /// E4 module with 10 fadd operations + ret.
 fn build_e4_fadd_module() -> E4Module {
     let code = vec![
@@ -385,6 +404,17 @@ fn bench_e4_execute_all_ops(c: &mut Criterion) {
     });
 }
 
+fn bench_e4_execute_f64(c: &mut Criterion) {
+    let module = build_e4_f64_module();
+    c.bench_function("e4_execute_f64_10x", |b| {
+        b.iter(|| {
+            let mut exec = E4Executor::default();
+            let r = exec.execute(black_box(&module), 0);
+            black_box(r)
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_e2_mem42,
@@ -403,5 +433,6 @@ criterion_group!(
     bench_e4_disasm,
     bench_e4_execute,
     bench_e4_execute_all_ops,
+    bench_e4_execute_f64,
 );
 criterion_main!(benches);

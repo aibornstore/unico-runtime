@@ -365,6 +365,20 @@ fn fmt_instruction(out: &mut Out, instr: &Instruction, pc: usize) {
             out.plain(" ");
             out.value(&format!("{:?}", imm));
         }
+        Instruction::FAddF64 { dst, a, b } => { out.op("fadd.f64"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", r"); out.value(&format!("{}r, r{}", a, b)); }
+        Instruction::FSubF64 { dst, a, b } => { out.op("fsub.f64"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", r"); out.value(&format!("{}r, r{}", a, b)); }
+        Instruction::FMulF64 { dst, a, b } => { out.op("fmul.f64"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", r"); out.value(&format!("{}r, r{}", a, b)); }
+        Instruction::FDivF64 { dst, a, b } => { out.op("fdiv.f64"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", r"); out.value(&format!("{}r, r{}", a, b)); }
+        Instruction::FSqrtF64 { dst, a } => { out.op("fsqrt.f64"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::FNegF64 { dst, a } => { out.op("fneg.f64"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::FAbsF64 { dst, a } => { out.op("fabs.f64"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::FRoundF64 { dst, a } => { out.op("fround.f64"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::FCmpF64 { pred, dst, a, b } => { out.op("fcmp.f64"); out.plain(" "); out.value(&format!("pred={}", pred)); out.plain(" r"); out.reg(&format!("{}", dst)); out.plain(", r"); out.value(&format!("{}r, r{}", a, b)); }
+        Instruction::I2F64 { dst, a } => { out.op("i2f64"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::F642I { dst, a } => { out.op("f64i"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::U2F64 { dst, a } => { out.op("u2f64"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::F642U { dst, a } => { out.op("f64u"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(", "); out.reg(&format!("r{}", a)); }
+        Instruction::FImmF64 { dst, imm } => { out.op("fimm.f64"); out.plain(" "); out.reg(&format!("r{}", dst)); out.plain(" "); out.value(&format!("{:?}", imm)); }
         Instruction::HostCall { id, args, results } => {
             out.op("host.call");
             out.plain(" ");
@@ -605,5 +619,36 @@ mod tests {
         assert!(text.contains("fn 1"));
         assert!(text.contains("params=0"));
         assert!(text.contains("params=1"));
+    }
+
+    #[test]
+    fn test_disasm_f64_instructions() {
+        // All F64 instruction types appear in disassembly
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::FImmF64 { dst: 0, imm: 3.14 },
+                    Instruction::FAddF64 { dst: 1, a: 0, b: 0 },
+                    Instruction::FMulF64 { dst: 2, a: 0, b: 0 },
+                    Instruction::FSqrtF64 { dst: 3, a: 0 },
+                    Instruction::FCmpF64 { pred: 0, dst: 4, a: 0, b: 0 },
+                    Instruction::I2F64 { dst: 5, a: 0 },
+                    Instruction::F642I { dst: 6, a: 0 },
+                    Instruction::Ret { dst: 6 },
+                ],
+            }],
+            memory: vec![],
+        };
+        let text = fmt_module_opts(&module, FmtOpts::default());
+        assert!(text.contains("fimm.f64"), "missing fimm.f64");
+        assert!(text.contains("fadd.f64"), "missing fadd.f64");
+        assert!(text.contains("fmul.f64"), "missing fmul.f64");
+        assert!(text.contains("fsqrt.f64"), "missing fsqrt.f64");
+        assert!(text.contains("fcmp.f64"), "missing fcmp.f64");
+        assert!(text.contains("i2f64"), "missing i2f64");
+        assert!(text.contains("f64i"), "missing f64i");
     }
 }

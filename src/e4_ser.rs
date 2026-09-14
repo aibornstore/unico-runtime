@@ -52,11 +52,16 @@ fn instruction_size(instr: &Instruction) -> usize {
         Instruction::BrIf { .. } | Instruction::LoadI64 { .. } | Instruction::StoreI64 { .. }
         | Instruction::FSqrt { .. } | Instruction::FNeg { .. } | Instruction::FAbs { .. }
         | Instruction::FRound { .. } | Instruction::I2F { .. } | Instruction::F2I { .. }
-        | Instruction::U2F { .. } | Instruction::F2U { .. } | Instruction::Mov { .. } => 9,
+        | Instruction::U2F { .. } | Instruction::F2U { .. } | Instruction::Mov { .. }
+        | Instruction::FSqrtF64 { .. } | Instruction::FNegF64 { .. } | Instruction::FAbsF64 { .. }
+        | Instruction::FRoundF64 { .. } | Instruction::I2F64 { .. } | Instruction::F642I { .. }
+        | Instruction::U2F64 { .. } | Instruction::F642U { .. } => 9,
         Instruction::FAdd { .. } | Instruction::FSub { .. } | Instruction::FMul { .. }
-        | Instruction::FDiv { .. } => 13,
-        Instruction::Cmp { .. } | Instruction::FCmp { .. } => 14,
-        Instruction::FImm { .. } => 9,
+        | Instruction::FDiv { .. }
+        | Instruction::FAddF64 { .. } | Instruction::FSubF64 { .. } | Instruction::FMulF64 { .. }
+        | Instruction::FDivF64 { .. } => 13,
+        Instruction::Cmp { .. } | Instruction::FCmp { .. } | Instruction::FCmpF64 { .. } => 14,
+        Instruction::FImm { .. } | Instruction::FImmF64 { .. } => 9,
         Instruction::HostCall { args, results, .. } => {
             13 + (args.len() + results.len()) * 4
         }
@@ -211,6 +216,20 @@ fn encode_instruction(buf: &mut Vec<u8>, instr: &Instruction) {
             write_u32(buf, *dst);
             buf.extend_from_slice(&imm.to_bits().to_le_bytes());
         }
+        Instruction::FAddF64 { dst, a, b } => { buf.push(0x17); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::FSubF64 { dst, a, b } => { buf.push(0x18); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::FMulF64 { dst, a, b } => { buf.push(0x19); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::FDivF64 { dst, a, b } => { buf.push(0x1A); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::FSqrtF64 { dst, a } => { buf.push(0x1B); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::FNegF64 { dst, a } => { buf.push(0x1C); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::FAbsF64 { dst, a } => { buf.push(0x1D); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::FRoundF64 { dst, a } => { buf.push(0x1E); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::FCmpF64 { pred, dst, a, b } => { buf.push(0x1F); buf.push(*pred); write_u32(buf, *dst); write_u32(buf, *a); write_u32(buf, *b); }
+        Instruction::I2F64 { dst, a } => { buf.push(0x20); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::F642I { dst, a } => { buf.push(0x21); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::U2F64 { dst, a } => { buf.push(0x22); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::F642U { dst, a } => { buf.push(0x23); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::FImmF64 { dst, imm } => { buf.push(0x24); write_u32(buf, *dst); buf.extend_from_slice(&imm.to_bits().to_le_bytes()); }
         Instruction::HostCall { id, args, results } => {
             buf.push(0x16);
             write_u32(buf, *id);
@@ -538,6 +557,20 @@ fn decode_instruction_from_cursor<R: Read>(cursor: &mut R) -> Result<Instruction
             }
             Ok(Instruction::HostCall { id, args, results })
         }
+        0x17 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::FAddF64 { dst, a, b }) }
+        0x18 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::FSubF64 { dst, a, b }) }
+        0x19 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::FMulF64 { dst, a, b }) }
+        0x1A => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::FDivF64 { dst, a, b }) }
+        0x1B => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::FSqrtF64 { dst, a }) }
+        0x1C => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::FNegF64 { dst, a }) }
+        0x1D => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::FAbsF64 { dst, a }) }
+        0x1E => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::FRoundF64 { dst, a }) }
+        0x1F => { let pred = cursor.read_u8().map_err(|e| e)?; let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::FCmpF64 { pred, dst, a, b }) }
+        0x20 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::I2F64 { dst, a }) }
+        0x21 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::F642I { dst, a }) }
+        0x22 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::U2F64 { dst, a }) }
+        0x23 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::F642U { dst, a }) }
+        0x24 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let imm = cursor.read_f64::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::FImmF64 { dst, imm }) }
         _ => Err(Error::Generic(format!("E4: unknown opcode {:#04x}", opcode))),
     }
 }
@@ -775,6 +808,7 @@ mod tests {
         exec.host_functions_mut().register(|args| {
             let first_bits = match &args[0] {
                 E4Value::F32(f) => f.to_bits() as i64,
+                E4Value::F64(f) => f.to_bits() as i64,
                 E4Value::I32(i) => *i as i64,
             };
             E4Value::I32(first_bits as i32)
@@ -824,5 +858,46 @@ mod tests {
         let encoded = encode_e4(&module);
         let estimate = encoded_size(&module);
         assert!(estimate >= encoded.len(), "estimate {} >= actual {}", estimate, encoded.len());
+    }
+
+    #[test]
+    fn test_e4_encode_decode_f64_instructions() {
+        // F64 instruction roundtrip
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::FImmF64 { dst: 0, imm: 3.14159265358979 }, // pi
+                    Instruction::FImmF64 { dst: 1, imm: 2.718281828459045 }, // e
+                    Instruction::FAddF64 { dst: 2, a: 0, b: 1 },
+                    Instruction::FMulF64 { dst: 3, a: 0, b: 1 },
+                    Instruction::FDivF64 { dst: 4, a: 0, b: 1 },
+                    Instruction::FSqrtF64 { dst: 5, a: 0 },
+                    Instruction::FNegF64 { dst: 6, a: 0 },
+                    Instruction::FAbsF64 { dst: 7, a: 1 },
+                    Instruction::FRoundF64 { dst: 0, a: 1 },
+                    Instruction::FCmpF64 { pred: 0, dst: 1, a: 0, b: 1 },
+                    Instruction::I2F64 { dst: 2, a: 0 },
+                    Instruction::F642I { dst: 3, a: 0 },
+                    Instruction::U2F64 { dst: 4, a: 0 },
+                    Instruction::F642U { dst: 5, a: 0 },
+                    Instruction::Ret { dst: 5 },
+                ],
+            }],
+            memory: vec![0u8; 256],
+        };
+        let encoded = encode_e4(&module);
+        let decoded = decode_e4(&encoded).unwrap();
+        assert_eq!(decoded.functions.len(), 1);
+        assert_eq!(decoded.functions[0].code.len(), 15);
+        // Check first instruction
+        if let Instruction::FImmF64 { dst, imm } = decoded.functions[0].code[0] {
+            assert_eq!(dst, 0);
+            assert!((imm - 3.14159265358979).abs() < 1e-10);
+        } else {
+            panic!("expected FImmF64");
+        }
     }
 }
