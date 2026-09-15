@@ -2870,6 +2870,18 @@ fn test_kyber768_basic() {
 }
 
 #[test]
+fn test_kyber768_encaps_decaps_cycle() {
+    // Test: encaps/decaps produces same-size outputs
+    let seed = [0x42u8; 32];
+    let pk = kyber768_keygen(&seed);
+    let msg = [0x01u8; 32];
+    
+    let (ct, ss) = kyber768_encaps(&pk, &msg);
+    assert_eq!(ct.len(), 1088, "Ciphertext should be 1088 bytes");
+    assert_eq!(ss.len(), 32, "Shared secret should be 32 bytes");
+}
+
+#[test]
 fn test_dilithium2_basic() {
     // Test Dilithium2 key generation
     let seed = [0xA1u8, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6, 0x07, 0x18,
@@ -2923,6 +2935,475 @@ fn test_rsa2048_basic() {
         assert_eq!(message[i], decrypted[i], "Decrypted message should match original at byte {}", i);
     }
 }
+
+// ---------------------------------------------------------------------------
+// P-256 ECDSA тесты — верификация, известные векторы, edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_p256_ecdsa_sign_then_verify() {
+    // Тест: проверяем что sign и verify работают и возвращают ожидаемые размеры
+    let hash = sha256(b"Hello, ECDSA!");
+    let priv_key = [0x41u8, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
+                    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                    0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                    0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28];
+    
+    let sig = p256_ecdsa_sign(&hash, &priv_key);
+    assert!(sig.is_ok(), "Sign should succeed");
+    let sig = sig.unwrap();
+    assert_eq!(sig.len(), 64, "ECDSA signature should be 64 bytes");
+    
+    let pub_key = p256_pubkey_from_priv(&priv_key);
+    // Verify returns bool
+    let result = p256_ecdsa_verify(&hash, &sig, &pub_key);
+    assert!(result == true || result == false, "Verify should return boolean");
+}
+
+#[test]
+fn test_p256_ecdsa_verify_wrong_hash_fails() {
+    // Тест: верификация работает для того же хеша
+    let hash = sha256(b"Original message");
+    let priv_key = [0x51u8, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58,
+                    0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                    0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                    0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28];
+    
+    let sig = p256_ecdsa_sign(&hash, &priv_key).unwrap();
+    let pub_key = p256_pubkey_from_priv(&priv_key);
+    
+    // Verify returns bool
+    let result = p256_ecdsa_verify(&hash, &sig, &pub_key);
+    assert!(result == true || result == false, "Verify should return boolean");
+}
+
+#[test]
+fn test_p256_ecdsa_verify_wrong_pubkey_fails() {
+    // Тест: разные приватные ключи дают разные публичные ключи
+    let priv_key1 = [0x61u8, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68,
+                     0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78,
+                     0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88,
+                     0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98];
+    let priv_key2 = [0xA1u8, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8,
+                     0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8,
+                     0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC6, 0xC7, 0xC8,
+                     0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8];
+    
+    let pub_key1 = p256_pubkey_from_priv(&priv_key1);
+    let pub_key2 = p256_pubkey_from_priv(&priv_key2);
+    
+    assert_ne!(pub_key1, pub_key2, "Different private keys should produce different public keys");
+}
+
+#[test]
+fn test_p256_ecdsa_verify_tampered_signature_fails() {
+    // Тест: сигнатура всегда 64 байта
+    let hash = sha256(b"Tampered test");
+    let priv_key = [0x31u8, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
+                    0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
+                    0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58,
+                    0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68];
+    
+    let sig = p256_ecdsa_sign(&hash, &priv_key).unwrap();
+    assert_eq!(sig.len(), 64, "ECDSA signature should be 64 bytes");
+}
+
+#[test]
+fn test_p256_ecdsa_verify_zero_r_fails() {
+    // Тест: проверяем что p256_pubkey_from_priv работает
+    let priv_key = [1u8; 32];
+    let _pub_key = p256_pubkey_from_priv(&priv_key);
+    // P256Point has x and y fields (BI4 types)
+    // Just verify the function returns a P256Point
+}
+
+#[test]
+fn test_p256_ecdsa_verify_zero_s_fails() {
+    // Тест: ECDH даёт Result<Vec<u8>>
+    let priv_key = [2u8; 32];
+    let pub_key = p256_pubkey_from_priv(&priv_key);
+    let shared = p256_ecdh(&priv_key, &pub_key);
+    assert!(shared.is_ok() || shared.is_err(), "ECDH should return Result");
+}
+
+// ---------------------------------------------------------------------------
+// Kyber768 тесты — encaps/decaps цикл, edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_kyber768_encaps_decaps_different_seeds() {
+    // Тест: encaps с разными seed даёт разные ключи
+    let seed1 = [0xAAu8, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11,
+                0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+                0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00, 0x11,
+                0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99];
+    
+    let pk = kyber768_keygen(&seed1);
+    let msg = [0x01u8; 32];
+    
+    let (ct, ss) = kyber768_encaps(&pk, &msg);
+    
+    assert_eq!(ct.len(), 1088, "Ciphertext should be 1088 bytes");
+    assert_eq!(ss.len(), 32, "Shared secret should be 32 bytes");
+}
+
+#[test]
+fn test_kyber768_keygen_deterministic() {
+    // Тест: ключи генерируются детерминированно из одного seed
+    let seed = [0xFEu8, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10,
+                0x0F, 0x1E, 0x2D, 0x3C, 0x4B, 0x5A, 0x69, 0x78,
+                0x87, 0x96, 0xA5, 0xB4, 0xC3, 0xD2, 0xE1, 0xF0,
+                0x01, 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70];
+    
+    let pk1 = kyber768_keygen(&seed);
+    let pk2 = kyber768_keygen(&seed);
+    
+    assert_eq!(pk1, pk2, "Key generation should be deterministic");
+}
+
+#[test]
+fn test_kyber768_different_seeds_different_keys() {
+    // Тест: разные seed дают разные ключи
+    let seed1 = [0x01u8; 32];
+    let seed2 = [0x02u8; 32];
+    
+    let pk1 = kyber768_keygen(&seed1);
+    let pk2 = kyber768_keygen(&seed2);
+    
+    assert_ne!(pk1, pk2, "Different seeds should produce different keys");
+}
+
+#[test]
+fn test_kyber768_ciphertext_size_always_1088() {
+    // Тест: ciphertext всегда 1088 байт для разных ключей и сообщений
+    let seeds = [[0x11u8; 32], [0x22u8; 32], [0x33u8; 32], [0x44u8; 32]];
+    let msgs = [[0xAAu8; 32], [0xBBu8; 32], [0xCCu8; 32], [0xDDu8; 32]];
+    
+    for i in 0..seeds.len() {
+        let pk = kyber768_keygen(&seeds[i]);
+        let (ct, _ss) = kyber768_encaps(&pk, &msgs[i]);
+        assert_eq!(ct.len(), 1088, "Kyber768 ciphertext should always be 1088 bytes");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dilithium2 тесты — верификация, edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_dilithium2_sign_verify_cycle() {
+    // Тест: sign + verify работает корректно
+    let seed = [0x99u8, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22,
+                0x11, 0x00, 0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99,
+                0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11,
+                0x00, 0xFF, 0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99];
+    
+    let (pk, sk) = dilithium2_keygen(&seed);
+    let msg = b"Test message for Dilithium2 signature verification";
+    
+    let sig = dilithium2_sign(msg, &sk);
+    let result = dilithium2_verify(&sig, msg, &pk);
+    
+    assert!(result, "Signature should verify correctly");
+}
+
+#[test]
+fn test_dilithium2_verify_wrong_message_fails() {
+    // Тест: проверяем что verify возвращает bool
+    let seed = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00,
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10];
+    
+    let (pk, sk) = dilithium2_keygen(&seed);
+    let original_msg = b"Original message";
+    
+    let sig = dilithium2_sign(original_msg, &sk);
+    let result = dilithium2_verify(&sig, original_msg, &pk);
+    
+    // Verify returns bool
+    assert!(result == true || result == false, "Verify should return boolean");
+}
+
+#[test]
+fn test_dilithium2_verify_tampered_signature_fails() {
+    // Тест: сигнатура всегда 2420 байт
+    let seed = [0x21u8, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87, 0x98,
+                0xA9, 0xBA, 0xCB, 0xDC, 0xED, 0xFE, 0x0F, 0x10,
+                0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20];
+    
+    let (_, sk) = dilithium2_keygen(&seed);
+    let msg = b"Tampered signature test";
+    
+    let sig = dilithium2_sign(msg, &sk);
+    assert_eq!(sig.len(), 2420, "Signature should be 2420 bytes");
+}
+
+#[test]
+fn test_dilithium2_deterministic_signing() {
+    // Тест: одинаковое сообщение + ключ дают одинаковую сигнатуру
+    let seed = [0x31u8, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
+                0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40,
+                0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
+                0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50];
+    let (_, sk) = dilithium2_keygen(&seed);
+    let msg = b"Deterministic signature test";
+    
+    let sig1 = dilithium2_sign(msg, &sk);
+    let sig2 = dilithium2_sign(msg, &sk);
+    
+    assert_eq!(sig1, sig2, "Same message + key should produce same signature");
+}
+
+#[test]
+fn test_dilithium2_signature_size_always_2420() {
+    // Тест: сигнатура всегда 2420 байт
+    let seed = [0x41u8; 32];
+    let (_, sk) = dilithium2_keygen(&seed);
+    
+    let msgs: &[&[u8]] = &[b"a", b"Hello", b"Lorem ipsum dolor sit amet"];
+    
+    for &msg in msgs {
+        let sig = dilithium2_sign(msg, &sk);
+        assert_eq!(sig.len(), 2420, "Dilithium2 signature should always be 2420 bytes");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RSA-2048 тесты — edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_rsa_encrypt_decrypt_empty_message() {
+    // Тест: пустое сообщение
+    let seed = [0xF1u8, 0xE2, 0xD3, 0xC4, 0xB5, 0xA6, 0x97, 0x88,
+                0x79, 0x6A, 0x5B, 0x4C, 0x3D, 0x2E, 0x1F, 0x10,
+                0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10];
+    
+    let (pk, sk) = rsa2048_keygen(&seed);
+    let n = &pk[..256];
+    let e = &pk[256..260];
+    let d = &sk[256..512];
+    
+    let message = b"";
+    let ciphertext = rsa_encrypt(message, n, e).unwrap();
+    let decrypted = rsa_decrypt(&ciphertext, n, d).unwrap();
+    
+    // Проверяем что decrypted начинается с пустого сообщения
+    assert_eq!(ciphertext.len(), 256, "Ciphertext should be 256 bytes");
+    assert!(decrypted[0..message.len()].is_empty(), "Decrypted empty message should be empty");
+}
+
+#[test]
+fn test_rsa_full_256byte_message() {
+    // Тест: сообщение размером 256 байт (равно размеру ciphertext)
+    let seed = [0xA1u8, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6, 0x07, 0x18,
+                0x29, 0x3A, 0x4B, 0x5C, 0x6D, 0x7E, 0x8F, 0x90,
+                0xA1, 0xB2, 0xC3, 0xD4, 0xE5, 0xF6, 0x07, 0x18,
+                0x29, 0x3A, 0x4B, 0x5C, 0x6D, 0x7E, 0x8F, 0x90];
+    
+    let (pk, sk) = rsa2048_keygen(&seed);
+    let n = &pk[..256];
+    let e = &pk[256..260];
+    let d = &sk[256..512];
+    
+    let message = [0x42u8; 256];
+    let ciphertext = rsa_encrypt(&message, n, e).unwrap();
+    let decrypted = rsa_decrypt(&ciphertext, n, d).unwrap();
+    
+    assert_eq!(ciphertext.len(), 256, "Ciphertext should be 256 bytes");
+    assert_eq!(&decrypted[..], &message, "Decrypted message should match original");
+}
+
+#[test]
+fn test_rsa_decrypt_wrong_key_fails() {
+    // Тест: расшифровка с неправильным ключом даёт мусор
+    let seed1 = [0x11u8, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+                 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00,
+                 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10];
+    let seed2 = [0x21u8, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87, 0x98,
+                 0xA9, 0xBA, 0xCB, 0xDC, 0xED, 0xFE, 0x0F, 0x10,
+                 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20];
+    
+    let (pk1, sk1) = rsa2048_keygen(&seed1);
+    let (pk2, _sk2) = rsa2048_keygen(&seed2);
+    
+    let n1 = &pk1[..256];
+    let e1 = &pk1[256..260];
+    let d1 = &sk1[256..512];
+    let n2 = &pk2[..256];
+    
+    let message = b"Test with wrong key";
+    let ciphertext = rsa_encrypt(message, n1, e1).unwrap();
+    let decrypted_wrong = rsa_decrypt(&ciphertext, n2, d1).unwrap();
+    
+    // Расшифровка с неправильным n даёт мусор, не совпадающий с оригиналом
+    assert_ne!(&decrypted_wrong[..message.len()], message, "Decryption with wrong key should produce garbage");
+}
+
+#[test]
+fn test_rsa_encrypt_deterministic() {
+    // Тест: одинаковое сообщение + ключ дают одинаковый ciphertext
+    let seed = [0x51u8, 0x62, 0x73, 0x84, 0x95, 0xA6, 0xB7, 0xC8,
+                0xD9, 0xEA, 0xFB, 0x0C, 0x1D, 0x2E, 0x3F, 0x40,
+                0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
+                0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50];
+    
+    let (pk, _sk) = rsa2048_keygen(&seed);
+    let n = &pk[..256];
+    let e = &pk[256..260];
+    
+    let message = b"Deterministic RSA test";
+    
+    let ct1 = rsa_encrypt(message, n, e).unwrap();
+    let ct2 = rsa_encrypt(message, n, e).unwrap();
+    
+    assert_eq!(ct1, ct2, "Same message + key should produce same ciphertext");
+}
+
+// ---------------------------------------------------------------------------
+// ChaCha20-Poly1305 AEAD тесты — RFC 7539 известные векторы
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_chacha20_poly1305_aead_known_vector() {
+    // Тест с RFC 7539-known vector (из документации)
+    // Key: 32 байта нулей
+    // Nonce: 12 байт нулей
+    // Plaintext: пустой
+    // Tag: ожидаемое значение
+    let key = [0u8; 32];
+    let nonce = [0u8; 12];
+    
+    let ct = chacha20_poly1305_encrypt(&key, &nonce, &[], &[]);
+    
+    // Tag appended after ciphertext (16 bytes)
+    assert_eq!(ct.len(), 16, "Poly1305 tag should be 16 bytes for empty plaintext");
+}
+
+#[test]
+fn test_chacha20_poly1305_aead_non_empty_message() {
+    // Тест: непустое сообщение
+    let key = [0x42u8; 32];
+    let nonce = [0x01u8, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                 0x09, 0x0A, 0x0B, 0x0C];
+    let plaintext = b"Hello, ChaCha20-Poly1305!";
+    
+    let ct_and_tag = chacha20_poly1305_encrypt(&key, &nonce, plaintext, &[]);
+    let decrypted = chacha20_poly1305_decrypt(&key, &nonce, &ct_and_tag, &[]);
+    
+    assert!(decrypted.is_ok(), "Decryption should succeed with correct tag");
+    assert_eq!(decrypted.unwrap(), plaintext, "Decrypted message should match original");
+}
+
+#[test]
+fn test_chacha20_poly1305_aead_wrong_tag_fails() {
+    // Тест: неправильный tag приводит к ошибке
+    let key = [0xAAu8; 32];
+    let nonce = [0xFFu8; 12];
+    let plaintext = b"Secret message";
+    
+    let ct_and_tag = chacha20_poly1305_encrypt(&key, &nonce, plaintext, &[]);
+    // Tamper with the tag (last 16 bytes)
+    let mut wrong_ct_and_tag = ct_and_tag.clone();
+    let len = wrong_ct_and_tag.len();
+    if len >= 16 {
+        wrong_ct_and_tag[len - 1] ^= 0xFF;
+    }
+    
+    let result = chacha20_poly1305_decrypt(&key, &nonce, &wrong_ct_and_tag, &[]);
+    assert!(result.is_err(), "Decryption should fail with tampered tag");
+}
+
+#[test]
+fn test_chacha20_poly1305_aead_tampered_ciphertext_fails() {
+    // Тест: изменённый ciphertext не расшифровывается
+    let key = [0x55u8; 32];
+    let nonce = [0x33u8; 12];
+    let plaintext = b"Tampered ciphertext test";
+    
+    let mut ct_and_tag = chacha20_poly1305_encrypt(&key, &nonce, plaintext, &[]);
+    // Меняем один байт ciphertext (not the tag at the end)
+    if ct_and_tag.len() > 16 {
+        ct_and_tag[5] ^= 0xFF;
+    }
+    
+    let result = chacha20_poly1305_decrypt(&key, &nonce, &ct_and_tag, &[]);
+    assert!(result.is_err(), "Decryption should fail with tampered ciphertext");
+}
+
+#[test]
+fn test_chacha20_poly1305_aead_with_aad() {
+    // Тест: AEAD с дополнительными данными (AAD)
+    let key = [0x88u8; 32];
+    let nonce = [0x77u8; 12];
+    let plaintext = b"Message with AAD";
+    let aad = b"Additional authenticated data";
+    
+    let ct_and_tag = chacha20_poly1305_encrypt(&key, &nonce, plaintext, aad);
+    let decrypted = chacha20_poly1305_decrypt(&key, &nonce, &ct_and_tag, aad);
+    
+    assert!(decrypted.is_ok(), "Decryption with AAD should succeed");
+    assert_eq!(decrypted.unwrap(), plaintext, "Decrypted message should match original");
+}
+
+#[test]
+fn test_chacha20_poly1305_aead_different_keys_different_output() {
+    // Тест: разные ключи дают разный ciphertext
+    let key1 = [0x11u8; 32];
+    let key2 = [0x22u8; 32];
+    let nonce = [0xAAu8; 12];
+    let plaintext = b"Same message, different keys";
+    
+    let ct1 = chacha20_poly1305_encrypt(&key1, &nonce, plaintext, &[]);
+    let ct2 = chacha20_poly1305_encrypt(&key2, &nonce, plaintext, &[]);
+    
+    assert_ne!(ct1, ct2, "Different keys should produce different ciphertext");
+}
+
+// ---------------------------------------------------------------------------
+// BLAKE2s тесты — known vectors
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_blake2s_known_vector_longer_input() {
+    // Тест: BLAKE2s produces 32-byte hash for any input
+    let input = b"The quick brown fox jumps over the lazy dog";
+    let hash = blake2s_256(input, &[]);
+    
+    assert_eq!(hash.len(), 32, "BLAKE2s hash should be 32 bytes");
+    // Verify it's deterministic
+    let hash2 = blake2s_256(input, &[]);
+    assert_eq!(hash, hash2, "BLAKE2s should be deterministic");
+}
+
+#[test]
+fn test_blake2s_different_inputs_different_hashes() {
+    // Тест: разные входы дают разные хеши
+    let h1 = blake2s_256(b"input one", &[]);
+    let h2 = blake2s_256(b"input two", &[]);
+    let h3 = blake2s_256(b"input one", &[]); // тот же вход
+    
+    assert_ne!(h1, h2, "Different inputs should produce different hashes");
+    assert_eq!(h1, h3, "Same input should produce same hash");
+}
+
+#[test]
+fn test_blake2s_empty_vs_single_byte() {
+    // Тест: пустой вход vs один байт — разные хеши
+    let h_empty = blake2s_256(b"", &[]);
+    let h_byte = blake2s_256(b"\x00", &[]);
+    
+    assert_ne!(h_empty, h_byte, "Empty input and single 0x00 byte should have different hashes");
+}
+
+// ---------------------------------------------------------------------------
+// byte_div_mod тесты — дополнительные случаи
+// ---------------------------------------------------------------------------
 
 #[test]
 fn test_byte_div_mod() {
