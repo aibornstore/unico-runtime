@@ -227,7 +227,8 @@ fn build_e4_module(code: Vec<E4Instr>) -> E4Module {
             register_count: 16,
             code,
         }],
-        memory: vec![0u8; 4096],
+        memory: vec![0u8; 65536],
+        tables: vec![],
     }
 }
 
@@ -331,7 +332,8 @@ fn bench_e4_encode_many_functions(c: &mut Criterion) {
     ];
     let mut module = E4Module {
         functions: Vec::new(),
-        memory: vec![0u8; 4096],
+        memory: vec![0u8; 65536],
+        tables: vec![],
     };
     for _ in 0..100 {
         module.functions.push(E4FunctionDef {
@@ -364,7 +366,8 @@ fn bench_e4_decode(c: &mut Criterion) {
 fn bench_e4_decode_many_functions(c: &mut Criterion) {
     let mut module = E4Module {
         functions: Vec::new(),
-        memory: vec![0u8; 4096],
+        memory: vec![0u8; 65536],
+        tables: vec![],
     };
     let code = vec![
         E4Instr::FImm { dst: 0, imm: 1.0 },
@@ -447,6 +450,68 @@ fn bench_e4_execute_iadd(c: &mut Criterion) {
     });
 }
 
+fn build_e4_tablebr_module() -> E4Module {
+    // TableBr: set r0=1, jump to table[0][1]=PC 4, return 2
+    let code = vec![
+        E4Instr::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+        E4Instr::TableBr { table_idx: 0, index: 0 }, // jump to PC 3
+        E4Instr::Ret { dst: 0 }, // unreachable (PC 2)
+        E4Instr::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // PC 3: r1 = 1
+        E4Instr::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 2
+        E4Instr::Ret { dst: 1 }, // return 2
+    ];
+    E4Module {
+        functions: vec![E4FunctionDef {
+            param_count: 0,
+            result_count: 1,
+            register_count: 4,
+            code,
+        }],
+        memory: vec![0u8; 65536],
+        tables: vec![vec![2, 3, 6]], // targets: PC 2, 3, 6
+    }
+}
+
+fn bench_e4_execute_tablebr(c: &mut Criterion) {
+    let module = build_e4_tablebr_module();
+    c.bench_function("e4_execute_tablebr", |b| {
+        b.iter(|| {
+            let mut exec = E4Executor::default();
+            let r = exec.execute(black_box(&module), 0);
+            black_box(r)
+        });
+    });
+}
+
+fn build_e4_memgrow_module() -> E4Module {
+    // MemGrow: grow memory by 100 bytes, return previous size
+    let code = vec![
+        E4Instr::MemGrow { dst: 0, delta: 100 },
+        E4Instr::Ret { dst: 0 },
+    ];
+    E4Module {
+        functions: vec![E4FunctionDef {
+            param_count: 0,
+            result_count: 1,
+            register_count: 4,
+            code,
+        }],
+        memory: vec![0u8; 65536],
+        tables: vec![],
+    }
+}
+
+fn bench_e4_execute_memgrow(c: &mut Criterion) {
+    let module = build_e4_memgrow_module();
+    c.bench_function("e4_execute_memgrow", |b| {
+        b.iter(|| {
+            let mut exec = E4Executor::default();
+            let r = exec.execute(black_box(&module), 0);
+            black_box(r)
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_e2_mem42,
@@ -467,5 +532,7 @@ criterion_group!(
     bench_e4_execute_all_ops,
     bench_e4_execute_f64,
     bench_e4_execute_iadd,
+    bench_e4_execute_tablebr,
+    bench_e4_execute_memgrow,
 );
 criterion_main!(benches);
