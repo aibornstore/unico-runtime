@@ -22,7 +22,7 @@ cargo bench           # Criterion benchmarks (dev-dependency only)
 | E4 | ✅ Complete (F64, integer arithmetic, bitwise ops, ZExt/SExt, TableBr, MemGrow, MemCopy/MemFill) |
 | E5 (14/14) | ✅ All passing |
 | E6 (11/11) | ✅ All passing |
-| E7 (crypto) | ✅ Reconstructed, all crypto tests pass (AES-128/256, SHA-256, BLAKE2s, HMAC, HKDF, ChaCha20, Poly1305) |
+| E7 (crypto) | ✅ Complete: AES-128/256, SHA-256, BLAKE2s, HMAC, HKDF, ChaCha20, Poly1305, P-256 ECC, Kyber768, Dilithium2, RSA-2048 |
 | U30 IR | ✅ Complete (serialize, deserialize, verify, debug, pretty-print, CLI) |
 
 ## E4 Profile Features
@@ -39,18 +39,19 @@ cargo bench           # Criterion benchmarks (dev-dependency only)
 
 ## E7 Crypto Features
 
-- AES-128/256 (GCM mode)
-- SHA-256
-- BLAKE2s-256
-- HMAC-SHA256
-- HKDF-SHA256
-- ChaCha20
-- Poly1305 (ChaCha20-Poly1305 AEAD)
+- **Symmetric**: AES-128/256, ChaCha20, Poly1305 (ChaCha20-Poly1305 AEAD)
+- **Hashing**: SHA-256, BLAKE2s-256
+- **MAC/KDF**: HMAC-SHA256, HKDF-SHA256
+- **ECC**: P-256 ECDH and ECDSA (EcdsaSign/EcdsaVerify)
+- **Post-Quantum**: Kyber768 (ML-KEM, opcodes 0x90-0x92), Dilithium2 (ML-DSA, opcodes 0x93-0x95)
+- **RSA**: RSA-2048 keygen/encrypt/decrypt (opcodes 0xA0-0xA2)
+- All pure software implementations (no external crypto libraries)
 
 ## Test Results
 
-- `cargo test --lib`: **296 passed**
-- `cargo test`: **315 passed** (296 lib + 16 integration + 3 doc)
+- `cargo test --lib`: **304 passed**
+- `cargo test`: **323 passed** (304 lib + 16 integration + 3 doc)
+- Zero compiler warnings
 
 ## Git
 
