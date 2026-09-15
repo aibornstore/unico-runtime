@@ -1536,4 +1536,71 @@ mod tests {
         assert_eq!(result.status, Status::Pass);
         assert_eq!(result.value.unwrap(), i32::MIN as i64); // 0x80000000
     }
+
+    #[test]
+    fn test_e4_tablebr() {
+        // TableBr: indirect jump via jump table
+        // Table[0] = [2, 4, 6] — three jump targets
+        // r0 = 1 (index), then TableBr jumps to table[0][1] = PC 4
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1 (index into table)
+                    Instruction::TableBr { table_idx: 0, index: 0 },   // jump to table[0][1] = PC 4
+                    Instruction::Ret { dst: 0 }, // unreachable (PC 2)
+                    Instruction::IAdd { dst: 1, a: 0, b: 0 }, // PC 4: r1 = 2 (0+0 was 1+1=2? no wait)
+                    // Let's restructure: at PC 4, set r1 to specific value
+                    // Need to use IAdd with r0 to get 2, or use two Cmp calls
+                    // Simpler: use two Cmps
+                    Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // PC 4: r1 = 1
+                    Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 2
+                    Instruction::Ret { dst: 1 }, // return 2
+                ],
+            }],
+            memory: vec![0u8; 64],
+            tables: vec![vec![2, 4, 6]], // table[0]: targets at PC 2, 4, 6
+        };
+        // Note: TableBr at PC 1 jumps to table[0][r0] = table[0][1] = 4
+        // So we skip PC 2 (Ret) and execute from PC 4
+        // At PC 4: Cmp sets r1=1, IAdd makes r1=2, Ret returns 2
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 2);
+    }
+
+    #[test]
+    fn test_e4_tablebr_index2() {
+        // TableBr with index 2 — jumps to table[0][2] = PC 5
+        // Table has entries [2, 4, 5] — target PC 5 = the Cmp instruction
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+                    Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 2 (index)
+                    Instruction::TableBr { table_idx: 0, index: 0 }, // jump to table[0][2] = PC 5
+                    Instruction::Ret { dst: 0 }, // unreachable (PC 2)
+                    Instruction::Ret { dst: 0 }, // unreachable (PC 4)
+                    Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // PC 5: r1 = (r0==r0)=1
+                    Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 2
+                    Instruction::IAdd { dst: 1, a: 1, b: 1 }, // r1 = 4
+                    Instruction::Ret { dst: 1 }, // return 4
+                ],
+            }],
+            memory: vec![0u8; 64],
+            tables: vec![vec![2, 4, 5]], // 3 targets: PC 2, 4, 5
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 4);
+    }
 }

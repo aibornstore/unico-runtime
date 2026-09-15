@@ -33,6 +33,12 @@ pub fn encoded_size(module: &E4Module) -> usize {
     for f in &module.functions {
         size += instruction_size_fn(f);
     }
+    // Jump tables: count + (count + entries) per table
+    size += 4; // table count
+    for table in &module.tables {
+        size += 4; // entry count
+        size += 4 * table.len(); // each entry is u32
+    }
     size
 }
 
@@ -91,6 +97,15 @@ pub fn encode_e4(module: &E4Module) -> Vec<u8> {
     write_u32(&mut buf, module.functions.len() as u32);
     for f in &module.functions {
         encode_function(&mut buf, f);
+    }
+
+    // Jump tables
+    write_u32(&mut buf, module.tables.len() as u32);
+    for table in &module.tables {
+        write_u32(&mut buf, table.len() as u32);
+        for &target in table {
+            write_u32(&mut buf, target);
+        }
     }
 
     buf
@@ -310,7 +325,26 @@ pub fn decode_e4(buf: &[u8]) -> Result<E4Module> {
         functions.push(decode_function_from_cursor(&mut cursor)?);
     }
 
-    Ok(E4Module { functions, memory, tables: vec![] })
+    // Jump tables
+    let table_count = cursor.read_u32::<LittleEndian>().map_err(|_| {
+        Error::Generic("E4: truncated data".into())
+    })? as usize;
+    let mut tables = Vec::with_capacity(table_count);
+    for _ in 0..table_count {
+        let entry_count = cursor.read_u32::<LittleEndian>().map_err(|_| {
+            Error::Generic("E4: truncated data".into())
+        })? as usize;
+        let mut entries = Vec::with_capacity(entry_count);
+        for _ in 0..entry_count {
+            let target = cursor.read_u32::<LittleEndian>().map_err(|_| {
+                Error::Generic("E4: truncated data".into())
+            })?;
+            entries.push(target);
+        }
+        tables.push(entries);
+    }
+
+    Ok(E4Module { functions, memory, tables })
 }
 
 fn decode_function_from_cursor<R: Read>(cursor: &mut R) -> Result<E4FunctionDef> {
@@ -706,6 +740,39 @@ mod tests {
         let result = exec.execute(&decoded, 0).unwrap();
         assert_eq!(result.status, crate::types::Status::Pass);
         assert_eq!(result.value.unwrap(), 123);
+    }
+
+    #[test]
+    fn test_e4_encode_decode_tablebr() {
+        // TableBr roundtrip: set r0=1, jump to table[0][1]=PC 3, return 2
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1 (index)
+                    Instruction::TableBr { table_idx: 0, index: 0 }, // jump to table[0][1] = PC 3
+                    Instruction::Ret { dst: 0 }, // unreachable (PC 2)
+                    Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // PC 3: r1 = 1
+                    Instruction::IAdd { dst: 1, a: 1, b: 1 }, // PC 4: r1 = 2
+                    Instruction::Ret { dst: 1 }, // PC 5: return 2
+                ],
+            }],
+            memory: vec![0u8; 64],
+            tables: vec![vec![2, 3, 6]], // targets: PC 2, 3, 6
+        };
+        let decoded = roundtrip(&module);
+        // Verify tables roundtrip correctly
+        assert_eq!(decoded.tables.len(), 1);
+        assert_eq!(decoded.tables[0], &[2, 3, 6]);
+        // Verify decoded code matches original
+        assert_eq!(decoded.functions[0].code.len(), 6);
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let result = exec.execute(&decoded, 0).unwrap();
+        assert_eq!(result.status, crate::types::Status::Pass);
+        assert_eq!(result.value.unwrap(), 2);
     }
 
     #[test]
