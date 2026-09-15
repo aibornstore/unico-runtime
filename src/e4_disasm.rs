@@ -653,12 +653,17 @@ mod tests {
                     Instruction::Mov { dst: 15, src: 0 },
                     Instruction::FImm { dst: 0, imm: 3.14 },
                     Instruction::HostCall { id: 0, args: vec![0], results: vec![1] },
+                    Instruction::ZExt { dst: 0, a: 1 },
+                    Instruction::SExt { dst: 1, a: 2 },
+                    Instruction::MemCopy { dst: 0, src: 1, size: 8 },
+                    Instruction::MemFill { addr: 0, value: 1, size: 8 },
+                    Instruction::MemGrow { dst: 0, delta: 1 },
                     Instruction::TableBr { table_idx: 0, index: 0 },
                     Instruction::Trap,
                     Instruction::Ret { dst: 0 },
                 ],
             }],
-            memory: vec![],
+            memory: vec![0u8; 256],
             tables: vec![vec![3, 4]], // table 0: index 0 → pc 3, index 1 → pc 4
         };
         let encoded = encode_e4(&module);
@@ -687,6 +692,11 @@ mod tests {
         assert!(text.contains("trap"));
         assert!(text.contains("ret "));
         assert!(text.contains("table.br"), "missing table.br");
+        assert!(text.contains("zxt "), "missing zxt");
+        assert!(text.contains("sxt "), "missing sxt");
+        assert!(text.contains("mem.copy"), "missing mem.copy");
+        assert!(text.contains("mem.fill"), "missing mem.fill");
+        assert!(text.contains("mem.grow"), "missing mem.grow");
     }
 
     #[test]
