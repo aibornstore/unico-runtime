@@ -100,6 +100,8 @@ pub enum Instruction {
     HostCall { id: u32, args: Vec<u32>, results: Vec<u32> },
     /// Indirect jump via jump table: jump to tables[table_idx][index]
     TableBr { table_idx: u32, index: u32 },
+    /// Grow memory by delta bytes, store previous size in dst
+    MemGrow { dst: u32, delta: u32 },
 }
 
 /// E4 function definition
@@ -609,6 +611,19 @@ impl E4Executor {
                     let &target = table.get(idx)
                         .ok_or_else(|| Error::Generic("E4: table index out of bounds".into()))?;
                     pc = target as usize;
+                }
+                Instruction::MemGrow { dst, delta } => {
+                    self.record_instruction("MemGrow");
+                    let prev_size = memory.len() as i32;
+                    let new_size = prev_size as u32 + *delta;
+                    if new_size > 1024 * 1024 {
+                        // Limit max memory to 1MB
+                        regs[*dst as usize] = E4Value::I32(-1);
+                    } else {
+                        memory.resize(new_size as usize, 0);
+                        regs[*dst as usize] = E4Value::I32(prev_size);
+                    }
+                    pc += 1;
                 }
             }
         }
@@ -1602,5 +1617,51 @@ mod tests {
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.status, Status::Pass);
         assert_eq!(result.value.unwrap(), 4);
+    }
+
+    #[test]
+    fn test_e4_memgrow() {
+        // MemGrow: grow memory by 100 bytes, returns previous size
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    Instruction::MemGrow { dst: 0, delta: 100 }, // r0 = 64 (old size), mem grows to 164
+                    Instruction::Ret { dst: 0 }, // return 64
+                ],
+            }],
+            memory: vec![0u8; 64],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 64); // previous memory size
+    }
+
+    #[test]
+    fn test_e4_memgrow_exceed_limit() {
+        // MemGrow: try to grow beyond 1MB limit, returns -1
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    Instruction::MemGrow { dst: 0, delta: 2_000_000 }, // exceeds 1MB limit
+                    Instruction::Ret { dst: 0 }, // return -1 (failure)
+                ],
+            }],
+            memory: vec![0u8; 64],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), -1); // failure indicator
     }
 }

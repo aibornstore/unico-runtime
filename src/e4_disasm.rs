@@ -456,6 +456,13 @@ fn fmt_instruction(out: &mut Out, instr: &Instruction, pc: usize) {
             out.plain(" ");
             out.reg(&format!("r{}", index));
         }
+        Instruction::MemGrow { dst, delta } => {
+            out.op("mem.grow");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(" ");
+            out.value(&format!("+{} bytes", delta));
+        }
     }
     out.writeln("");
 }

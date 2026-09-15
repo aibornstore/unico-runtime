@@ -71,7 +71,7 @@ fn instruction_size(instr: &Instruction) -> usize {
         | Instruction::IAnd { .. } | Instruction::IOr { .. } | Instruction::IXor { .. }
         | Instruction::IRotl { .. } | Instruction::IRotr { .. } => 13,
         Instruction::INot { .. } | Instruction::IClz { .. } | Instruction::ICtz { .. }
-        | Instruction::IPopcnt { .. } | Instruction::TableBr { .. } => 9,
+        | Instruction::IPopcnt { .. } | Instruction::TableBr { .. } | Instruction::MemGrow { .. } => 9,
         Instruction::Cmp { .. } | Instruction::FCmp { .. } | Instruction::FCmpF64 { .. } => 14,
         Instruction::FImm { .. } | Instruction::FImmF64 { .. } => 9,
         Instruction::HostCall { args, results, .. } => {
@@ -277,6 +277,7 @@ fn encode_instruction(buf: &mut Vec<u8>, instr: &Instruction) {
             }
         }
         Instruction::TableBr { table_idx, index } => { buf.push(0x32); write_u32(buf, *table_idx); write_u32(buf, *index); }
+        Instruction::MemGrow { dst, delta } => { buf.push(0x33); write_u32(buf, *dst); write_u32(buf, *delta); }
     }
 }
 
@@ -639,6 +640,7 @@ fn decode_instruction_from_cursor<R: Read>(cursor: &mut R) -> Result<Instruction
         0x30 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IRotl { dst, a, b }) }
         0x31 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IRotr { dst, a, b }) }
         0x32 => { let table_idx = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let index = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::TableBr { table_idx, index }) }
+        0x33 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let delta = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::MemGrow { dst, delta }) }
         _ => Err(Error::Generic(format!("E4: unknown opcode {:#04x}", opcode))),
     }
 }
