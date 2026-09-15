@@ -6,8 +6,8 @@ Rust execution runtime for the UNICO virtual machine (v3.0). Branch `yuriy` for 
 
 ```bash
 cargo build --lib
-cargo test --lib      # 100 unit tests
-cargo test            # + 16 integration tests
+cargo test --lib      # 292 unit tests
+cargo test            # + 16 integration tests + 3 doc tests = 311 total
 cargo bench           # Criterion benchmarks (dev-dependency only)
 ```
 
@@ -19,26 +19,37 @@ cargo bench           # Criterion benchmarks (dev-dependency only)
 | E1 | ✅ Complete |
 | E2 | ✅ Complete |
 | E3 | ✅ Complete |
+| E4 | ✅ Complete (F64, integer arithmetic, bitwise ops, TableBr, MemGrow) |
 | E5 (14/14) | ✅ All passing |
 | E6 (11/11) | ✅ All passing |
 | E7 (crypto) | ✅ Reconstructed, all crypto tests pass (AES-128/256, SHA-256, BLAKE2s, HMAC, HKDF, ChaCha20, Poly1305) |
+| U30 IR | ✅ Complete (serialize, deserialize, verify, debug, pretty-print, CLI) |
 
-## T12 Fixes — E7 big-int modular arithmetic (`src/exec/e7.rs`)
+## E4 Profile Features
 
-- **AddMod**: was ignoring modulus (`m: _`). Now subtracts `m_lo` when `sum_lo >= m_lo`.
-- **MulMod**: was truncating BI5 to `u128` via `wrapping_mul`. Now uses full 128-bit modular multiply.
-- **ModExp**: was using `exp128 = base128` and looping `0..5` over 3-limb BI5. Now correct square-and-multiply over 130 bits of exponent.
+- **F64 floating-point**: FAdd, FSub, FMul, FDiv, FSqrt, FNeg, FAbs, FRound, FCmp, FImm
+- **Integer arithmetic**: IAdd, ISub, IMul, IDiv (with div-by-zero guard)
+- **Bitwise operations**: IAnd, IOr, IXor, INot, IClz, ICtz, IPopcnt, IRotl, IRotr
+- **Memory**: LoadI64, StoreI64, MemGrow (dynamic memory growth up to 1MB)
+- **Control flow**: Br, BrIf, Ret, Trap, Cmp, TableBr (indirect jump via jump tables)
+- **Host boundary**: HostCall with function registry (print, add, mul, sub, div, read, write)
+- **Binary format**: encode_e4/decode_e4 with magic "E4XX"
+- **Disassembler**: decode_disasm for E4 binary to readable text
 
-## T14 — Property tests
+## E7 Crypto Features
 
-- ULEB encode/decode roundtrip (1000 random + boundary values)
-- SLEB encode/decode roundtrip (1000 random + i64 boundary values)
-- AddMod/MulMod/ModExp properties (200/200/50 random values)
+- AES-128/256 (GCM mode)
+- SHA-256
+- BLAKE2s-256
+- HMAC-SHA256
+- HKDF-SHA256
+- ChaCha20
+- Poly1305 (ChaCha20-Poly1305 AEAD)
 
 ## Test Results
 
-- `cargo test --lib`: **100 passed** (was 95, +5 property tests)
-- `cargo test`: **116 passed** (95 lib + 16 integration + 5 property)
+- `cargo test --lib`: **292 passed**
+- `cargo test`: **311 passed** (292 lib + 16 integration + 3 doc)
 
 ## Git
 
