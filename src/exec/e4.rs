@@ -1,20 +1,23 @@
 //! E4 Executor — Floating-Point Scalar Profile
 //!
-//! Scalar f32/f64 arithmetic extending E3 integer operations:
-//! - FADD, FSUB, FMUL, FDIV, FSQRT (binary f32)
-//! - FNEG, FABS, FROUND (unary f32)
-//! - FCMP (comparison: lt, le, gt, ge, eq, ne)
-//! - I2F, F2I, U2F, F2U (type conversions)
-//! - FIMM (f32 immediate)
+//! Scalar f32/f64 arithmetic extending E3 integer operations.
+//! Instruction enum dispatched via pattern matching (opcodes in e4_ser.rs).
 //!
-//! E4 opcodes:
-//!   0x40 => FADD    0x41 => FSUB    0x42 => FMUL    0x43 => FDIV
-//!   0x44 => FSQRT   0x45 => FNEG    0x46 => FABS    0x47 => FROUND
-//!   0x48 => FCMP    0x49 => I2F     0x4A => F2I
-//!   0x4B => U2F     0x4C => F2U     0x4D => FIMM
-//!   (E1)  0x01 => BR       0x02 => BR_IF   0x03 => RET    0x04 => TRAP
-//!   (E1)  0x05 => CMP
-//!   (E2)  0x90 => LOAD.I64 0x91 => STORE.I64
+//! Opcodes:
+//!   0x00 Br       0x01 BrIf    0x02 Ret        0x03 Trap
+//!   0x04 Cmp      0x05 LoadI64  0x06 StoreI64  0x07 FAdd
+//!   0x08 FSub     0x09 FMul     0x0A FDiv       0x0B FSqrt
+//!   0x0C FNeg     0x0D FAbs     0x0E FRound     0x0F FCmp
+//!   0x10 I2F      0x11 F2I      0x12 U2F        0x13 F2U
+//!   0x14 Mov      0x15 FImm     0x16 HostCall
+//!   0x17 FAddF64  0x18 FSubF64  0x19 FMulF64    0x1A FDivF64
+//!   0x1B FSqrtF64 0x1C FNegF64  0x1D FAbsF64    0x1E FRoundF64  0x1F FCmpF64
+//!   0x20 I2F64    0x21 F642I    0x22 U2F64      0x23 F642U
+//!   0x24 FImmF64  0x25 IAdd     0x26 ISub       0x27 IMul    0x28 IDiv
+//!   0x29 IAnd     0x2A IOr      0x2B IXor       0x2C INot
+//!   0x2D IClz     0x2E ICtz     0x2F IPopcnt    0x30 IRotl
+//!   0x31 IRotr    0x32 TableBr  0x33 MemGrow    0x34 SExt
+//!   0x35 ZExt     0x36 MemCopy  0x37 MemFill
 
 use crate::error::{Error, Result};
 use crate::host::HostFunctions;
