@@ -684,8 +684,6 @@ impl E4Executor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::host::HostFunctions;
-
     fn make_module(code: Vec<Instruction>) -> E4Module {
         E4Module {
             functions: vec![E4FunctionDef {
@@ -712,12 +710,14 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     /// Helper to test FP ops: loads two f32 values into regs via i2f
     /// We use FImm to set f32 values directly (stored as bits in i32)
     fn fbits(f: f32) -> i32 {
         f.to_bits() as i32
     }
 
+    #[allow(dead_code)]
     fn fimm(v: f32) -> Instruction {
         Instruction::FImm { dst: 0, imm: v }
     }
@@ -1314,7 +1314,7 @@ mod tests {
         // Property: memory is reset between executions
         let mut exec = E4Executor::default();
         exec.host_functions_mut().register(|_args| E4Value::I32(0));
-        let mut m1 = make_module_with_memory(vec![
+        let m1 = make_module_with_memory(vec![
             Instruction::StoreI64 { addr: 8, src: 0 }, // store I32(0) at addr 8
             Instruction::LoadI64 { dst: 1, addr: 8 },  // load back
             Instruction::Ret { dst: 1 },

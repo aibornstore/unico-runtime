@@ -2569,7 +2569,7 @@ mod tests {
     #[test]
     fn u30x_br_works() {
         // Single-block function with unconditional Br to another block
-        let module = U30Module {
+        let _module = U30Module {
             regions: vec![],
             tables: vec![],
             functions: vec![U30Function {

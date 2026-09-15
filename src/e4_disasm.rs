@@ -507,7 +507,7 @@ fn fmt_instruction(out: &mut Out, instr: &Instruction, pc: usize) {
 mod tests {
     use super::*;
     use crate::e4_ser::encode_e4;
-    use crate::exec::e4::{E4Executor, E4Module};
+    use crate::exec::e4::E4Module;
 
     #[test]
     fn test_disasm_basic() {

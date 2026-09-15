@@ -1767,7 +1767,7 @@ mod tests {
 
     #[test]
     fn test_uleb_roundtrip_large_range() {
-        let max_uleb = (1usize << 60); // stays within 9 ULEB bytes (shift+7 ≤ 64)
+        let max_uleb = 1usize << 60; // stays within 9 ULEB bytes (shift+7 ≤ 64)
         let mut rng = LcgRng::new(0x123456789abcdef);
         for _ in 0..1000 {
             let v = (rng.next_u128() as usize) % max_uleb;
@@ -1807,7 +1807,8 @@ mod tests {
     // Property-based tests for big-int modular arithmetic (T12)
     // =====================================================================
 
-    fn mod_reduce(mut n: u128, m: u128) -> u128 {
+    #[allow(dead_code)]
+    fn mod_reduce(n: u128, m: u128) -> u128 {
         let mut r = n % m;
         while r >= m { r -= m; }
         r
