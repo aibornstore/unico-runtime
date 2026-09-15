@@ -283,6 +283,63 @@ impl U30DebugState {
         data.bytes[offset..offset + 8].copy_from_slice(&val.to_le_bytes());
         Ok(())
     }
+
+    fn mem_copy(
+        &mut self,
+        dst_region: u32,
+        dst_offset_reg: u32,
+        src_region: u32,
+        src_offset_reg: u32,
+        size_reg: u32,
+    ) -> Result<()> {
+        // Read registers first (avoid borrow conflict)
+        let dst_off = self.reg(dst_offset_reg)?.as_u64()? as usize;
+        let src_off = self.reg(src_offset_reg)?.as_u64()? as usize;
+        let n = self.reg(size_reg)?.as_u64()? as usize;
+
+        // Read source region
+        let src_data = self.regions.get(&src_region)
+            .ok_or_else(|| Error::Generic(format!("U30X memcopy unknown src region {src_region}")))?;
+        if !src_data.readable {
+            return Err(Error::Generic(format!("U30X memcopy src region {src_region} not readable")));
+        }
+        if src_off + n > src_data.bytes.len() {
+            return Err(Error::Generic("U30X memcopy src out of bounds".into()));
+        }
+        let src_slice = src_data.bytes[src_off..src_off + n].to_vec();
+
+        // Write to destination region
+        let data = self.regions.get_mut(&dst_region)
+            .ok_or_else(|| Error::Generic(format!("U30X memcopy unknown dst region {dst_region}")))?;
+        if !data.writable {
+            return Err(Error::Generic(format!("U30X memcopy dst region {dst_region} not writable")));
+        }
+        if dst_off + n > data.bytes.len() {
+            return Err(Error::Generic("U30X memcopy dst out of bounds".into()));
+        }
+        data.bytes[dst_off..dst_off + n].copy_from_slice(&src_slice);
+        Ok(())
+    }
+
+    fn mem_fill(
+        &mut self,
+        region: u32,
+        offset_reg: u32,
+        value_reg: u32,
+        size_reg: u32,
+    ) -> Result<()> {
+        let off = self.reg(offset_reg)?.as_u64()? as usize;
+        let val = self.reg(value_reg)?.as_u32()? as u8;
+        let n = self.reg(size_reg)?.as_u64()? as usize;
+
+        let data = self.regions.get_mut(&region)
+            .ok_or_else(|| Error::Generic(format!("U30X memfill unknown region {region}")))?;
+        if off + n > data.bytes.len() {
+            return Err(Error::Generic("U30X memfill out of bounds".into()));
+        }
+        data.bytes[off..off + n].fill(val);
+        Ok(())
+    }
 }
 
 use std::collections::BTreeSet;
@@ -836,8 +893,11 @@ impl U30Debugger {
             U30Op::StoreU64 { region, offset, src } => {
                 self.state.store_u64(*region, *offset, *src)?;
             }
-            U30Op::MemCopy { .. } | U30Op::MemFill { .. } => {
-                // TODO: implement memory copy/fill
+            U30Op::MemCopy { dst_region, dst_offset, src_region, src_offset, size } => {
+                self.state.mem_copy(*dst_region, *dst_offset, *src_region, *src_offset, *size)?;
+            }
+            U30Op::MemFill { region, offset, value, size } => {
+                self.state.mem_fill(*region, *offset, *value, *size)?;
             }
             U30Op::MemSize { dst, region } => {
                 let data = self.state.regions.get(region)
