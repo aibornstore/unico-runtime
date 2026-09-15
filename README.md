@@ -49,8 +49,8 @@ cargo bench           # Criterion benchmarks (dev-dependency only)
 
 ## Test Results
 
-- `cargo test --lib`: **292 passed**
-- `cargo test`: **311 passed** (292 lib + 16 integration + 3 doc)
+- `cargo test --lib`: **296 passed**
+- `cargo test`: **315 passed** (296 lib + 16 integration + 3 doc)
 
 ## Git
 

@@ -4,6 +4,7 @@
 //! 
 //! Based on UNICO v3.0 Execution Contract
 
+pub mod assembler;
 pub mod debugger;
 pub mod e4_disasm;
 pub mod e4_ser;

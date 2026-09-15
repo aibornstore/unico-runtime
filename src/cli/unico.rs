@@ -17,6 +17,7 @@ mod encode_cmd;
 mod decode_cmd;
 mod debug_cmd;
 mod disasm_cmd;
+mod assemble_cmd;
 
 pub use run_cmd::run_module;
 pub use info_cmd::info_module;
@@ -24,6 +25,7 @@ pub use encode_cmd::encode_module;
 pub use decode_cmd::decode_module;
 pub use debug_cmd::debug_module;
 pub use disasm_cmd::disasm_file;
+pub use assemble_cmd::assemble_file;
 
 #[derive(Parser)]
 #[command(name = "unico")]
@@ -117,6 +119,16 @@ enum Commands {
         #[arg(long)]
         show_memory: bool,
     },
+    /// Assemble U30 assembly text into binary
+    Assemble {
+        /// Assembly source file (or - for stdin)
+        #[arg(value_name = "FILE")]
+        source: PathBuf,
+
+        /// Output file (or stdout if not specified)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
 }
 
 fn main() {
@@ -142,6 +154,9 @@ fn main() {
         }
         Commands::Disasm { file, no_colors, show_memory } => {
             disasm_file(&file, no_colors, show_memory, verbose)
+        }
+        Commands::Assemble { source, output } => {
+            assemble_file(&source, output.as_deref(), verbose)
         }
     };
 

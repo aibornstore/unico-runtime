@@ -3,6 +3,7 @@ use unico_runtime::{E2Module, E2Executor, exec::e3::{E3Module, E3Executor, Instr
 use unico_runtime::exec::e4::{E4Module, E4FunctionDef, E4Executor, Instruction as E4Instr};
 use unico_runtime::{encode_e4, decode_e4};
 use unico_runtime::e4_disasm::fmt_module;
+use unico_runtime::exec::e5::{E5Module, E5Executor, Instruction as E5Instr, build_e5};
 
 /// Build a Python-compatible E2 module with the given code bytes.
 /// Python format: FUNC section = [func_count, param_count, result_count, register_count,
@@ -512,6 +513,79 @@ fn bench_e4_execute_memgrow(c: &mut Criterion) {
     });
 }
 
+fn build_e5_vadd_module() -> E5Module {
+    let code = vec![
+        E5Instr::VImm { dst: 0, imm: 1.0f32 },
+        E5Instr::VImm { dst: 1, imm: 2.0f32 },
+        E5Instr::VAdd { dst: 2, a: 0, b: 1 },
+        E5Instr::Ret,
+    ];
+    E5Module::parse(&build_e5(&code)).expect("parse E5 module failed")
+}
+
+fn bench_e5_execute(c: &mut Criterion) {
+    let module = build_e5_vadd_module();
+    c.bench_function("e5_execute_vadd", |b| {
+        b.iter(|| {
+            let mut exec = E5Executor::new();
+            let r = exec.execute(black_box(&module)).expect("execute error");
+            black_box(r)
+        });
+    });
+}
+
+fn bench_e5_all_ops(c: &mut Criterion) {
+    let code = vec![
+        E5Instr::VImm { dst: 0, imm: 1.0f32 },
+        E5Instr::VImm { dst: 1, imm: 2.0f32 },
+        E5Instr::VAdd { dst: 2, a: 0, b: 1 },
+        E5Instr::VMul { dst: 3, a: 0, b: 1 },
+        E5Instr::VSub { dst: 4, a: 0, b: 1 },
+        E5Instr::VDiv { dst: 5, a: 0, b: 1 },
+        E5Instr::VSqrt { dst: 6, a: 0 },
+        E5Instr::VMin { dst: 7, a: 0, b: 1 },
+        E5Instr::VMax { dst: 8, a: 0, b: 1 },
+        E5Instr::VSetImm { dst: 9, imm: 3.0f32 },
+        E5Instr::VLoad { addr: 0, dst: 10 },
+        E5Instr::VStore { addr: 0, src: 10 },
+        E5Instr::VMov { dst: 11, src: 0 },
+        E5Instr::VCpy { dst: 12, src: 0 },
+        E5Instr::VZero { dst: 13 },
+        E5Instr::VOne { dst: 14 },
+        E5Instr::VMemZero,
+        E5Instr::Ret,
+    ];
+    let module = E5Module::parse(&build_e5(&code)).expect("parse E5 module failed");
+    c.bench_function("e5_execute_all_ops", |b| {
+        b.iter(|| {
+            let mut exec = E5Executor::new();
+            let r = exec.execute(black_box(&module)).expect("execute error");
+            black_box(r)
+        });
+    });
+}
+
+fn build_e5_memzero_module() -> E5Module {
+    let code = vec![
+        E5Instr::VImm { dst: 0, imm: 1.0f32 },
+        E5Instr::VSetImm { dst: 1, imm: 2.0f32 },
+        E5Instr::VAdd { dst: 2, a: 0, b: 1 },
+        E5Instr::Ret,
+    ];
+    E5Module::parse(&build_e5(&code)).expect("parse E5 module failed")
+}
+
+fn bench_e5_memzero(c: &mut Criterion) {
+    let module = build_e5_memzero_module();
+    c.bench_function("e5_execute_memzero", |b| {
+        b.iter(|| {
+            let mut exec = E5Executor::new();
+            let r = exec.execute(black_box(&module)).expect("execute error");
+            black_box(r)
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_e2_mem42,
@@ -534,5 +608,8 @@ criterion_group!(
     bench_e4_execute_iadd,
     bench_e4_execute_tablebr,
     bench_e4_execute_memgrow,
+    bench_e5_execute,
+    bench_e5_all_ops,
+    bench_e5_memzero,
 );
 criterion_main!(benches);
