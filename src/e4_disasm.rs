@@ -463,6 +463,38 @@ fn fmt_instruction(out: &mut Out, instr: &Instruction, pc: usize) {
             out.plain(" ");
             out.value(&format!("+{} bytes", delta));
         }
+        Instruction::SExt { dst, a } => {
+            out.op("sxt");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(" ");
+            out.reg(&format!("r{}", a));
+        }
+        Instruction::ZExt { dst, a } => {
+            out.op("zxt");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(" ");
+            out.reg(&format!("r{}", a));
+        }
+        Instruction::MemCopy { dst, src, size } => {
+            out.op("mem.copy");
+            out.plain(" ");
+            out.reg(&format!("r{}", dst));
+            out.plain(" ");
+            out.reg(&format!("r{}", src));
+            out.plain(" ");
+            out.value(&format!("{} bytes", size));
+        }
+        Instruction::MemFill { addr, value, size } => {
+            out.op("mem.fill");
+            out.plain(" ");
+            out.reg(&format!("r{}", addr));
+            out.plain(" ");
+            out.value(&format!("{:#x}", value));
+            out.plain(" ");
+            out.value(&format!("{} bytes", size));
+        }
     }
     out.writeln("");
 }

@@ -71,7 +71,9 @@ fn instruction_size(instr: &Instruction) -> usize {
         | Instruction::IAnd { .. } | Instruction::IOr { .. } | Instruction::IXor { .. }
         | Instruction::IRotl { .. } | Instruction::IRotr { .. } => 13,
         Instruction::INot { .. } | Instruction::IClz { .. } | Instruction::ICtz { .. }
-        | Instruction::IPopcnt { .. } | Instruction::TableBr { .. } | Instruction::MemGrow { .. } => 9,
+        | Instruction::IPopcnt { .. } | Instruction::TableBr { .. } | Instruction::MemGrow { .. }
+        | Instruction::SExt { .. } | Instruction::ZExt { .. } => 9,
+        Instruction::MemCopy { .. } | Instruction::MemFill { .. } => 13,
         Instruction::Cmp { .. } | Instruction::FCmp { .. } | Instruction::FCmpF64 { .. } => 14,
         Instruction::FImm { .. } | Instruction::FImmF64 { .. } => 9,
         Instruction::HostCall { args, results, .. } => {
@@ -278,6 +280,10 @@ fn encode_instruction(buf: &mut Vec<u8>, instr: &Instruction) {
         }
         Instruction::TableBr { table_idx, index } => { buf.push(0x32); write_u32(buf, *table_idx); write_u32(buf, *index); }
         Instruction::MemGrow { dst, delta } => { buf.push(0x33); write_u32(buf, *dst); write_u32(buf, *delta); }
+        Instruction::SExt { dst, a } => { buf.push(0x34); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::ZExt { dst, a } => { buf.push(0x35); write_u32(buf, *dst); write_u32(buf, *a); }
+        Instruction::MemCopy { dst, src, size } => { buf.push(0x36); write_u32(buf, *dst); write_u32(buf, *src); write_u32(buf, *size); }
+        Instruction::MemFill { addr, value, size } => { buf.push(0x37); write_u32(buf, *addr); write_u32(buf, *value); write_u32(buf, *size); }
     }
 }
 
@@ -641,6 +647,10 @@ fn decode_instruction_from_cursor<R: Read>(cursor: &mut R) -> Result<Instruction
         0x31 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let b = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::IRotr { dst, a, b }) }
         0x32 => { let table_idx = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let index = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::TableBr { table_idx, index }) }
         0x33 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let delta = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::MemGrow { dst, delta }) }
+        0x34 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::SExt { dst, a }) }
+        0x35 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let a = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::ZExt { dst, a }) }
+        0x36 => { let dst = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let src = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let size = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::MemCopy { dst, src, size }) }
+        0x37 => { let addr = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let value = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; let size = cursor.read_u32::<LittleEndian>().map_err(|e| e)?; Ok(Instruction::MemFill { addr, value, size }) }
         _ => Err(Error::Generic(format!("E4: unknown opcode {:#04x}", opcode))),
     }
 }
@@ -1067,6 +1077,12 @@ mod tests {
             Instruction::IRotl { dst: 0, a: 0, b: 1 },
             Instruction::IRotr { dst: 0, a: 0, b: 1 },
             Instruction::HostCall { id: 0, args: vec![0, 1], results: vec![2] },
+            Instruction::ZExt { dst: 0, a: 1 },
+            Instruction::SExt { dst: 1, a: 2 },
+            Instruction::MemCopy { dst: 0, src: 1, size: 8 },
+            Instruction::MemFill { addr: 0, value: 1, size: 8 },
+            Instruction::TableBr { table_idx: 0, index: 1 },
+            Instruction::MemGrow { dst: 0, delta: 1 },
         ];
         for instr in all_instructions {
             let module = E4Module {

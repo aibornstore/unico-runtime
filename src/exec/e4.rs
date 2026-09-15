@@ -102,6 +102,14 @@ pub enum Instruction {
     TableBr { table_idx: u32, index: u32 },
     /// Grow memory by delta bytes, store previous size in dst
     MemGrow { dst: u32, delta: u32 },
+    /// Sign-extend i32 to i64 (stored as i32 with sign extension semantics)
+    SExt { dst: u32, a: u32 },
+    /// Zero-extend u8 to i32
+    ZExt { dst: u32, a: u32 },
+    /// Copy memory: copy `size` bytes from `src` to `dst`
+    MemCopy { dst: u32, src: u32, size: u32 },
+    /// Fill memory: fill `size` bytes starting at `addr` with `value`
+    MemFill { addr: u32, value: u32, size: u32 },
 }
 
 /// E4 function definition
@@ -623,6 +631,42 @@ impl E4Executor {
                         memory.resize(new_size as usize, 0);
                         regs[*dst as usize] = E4Value::I32(prev_size);
                     }
+                    pc += 1;
+                }
+                Instruction::SExt { dst, a } => {
+                    self.record_instruction("SExt");
+                    // Sign-extend i32 to i64 — stored as i32 but as i64 in semantics
+                    let val = regs[*a as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(val); // i32 sign-extends naturally
+                    pc += 1;
+                }
+                Instruction::ZExt { dst, a } => {
+                    self.record_instruction("ZExt");
+                    // Zero-extend u8 to i32 — take low 8 bits
+                    let val = regs[*a as usize].as_i32()?;
+                    regs[*dst as usize] = E4Value::I32(val & 0xFF);
+                    pc += 1;
+                }
+                Instruction::MemCopy { dst, src, size } => {
+                    self.record_instruction("MemCopy");
+                    let dst_addr = regs[*dst as usize].as_i32()? as usize;
+                    let src_addr = regs[*src as usize].as_i32()? as usize;
+                    let size = *size as usize;
+                    if dst_addr + size > memory.len() || src_addr + size > memory.len() {
+                        return Ok(ExecutionResult::fail("E4: MemCopy out of bounds".into(), self.provenance()));
+                    }
+                    memory.copy_within(src_addr..src_addr + size, dst_addr);
+                    pc += 1;
+                }
+                Instruction::MemFill { addr, value, size } => {
+                    self.record_instruction("MemFill");
+                    let addr = regs[*addr as usize].as_i32()? as usize;
+                    let value = (regs[*value as usize].as_i32()? & 0xFF) as u8;
+                    let size = *size as usize;
+                    if addr + size > memory.len() {
+                        return Ok(ExecutionResult::fail("E4: MemFill out of bounds".into(), self.provenance()));
+                    }
+                    memory[addr..addr + size].fill(value);
                     pc += 1;
                 }
             }
@@ -1663,5 +1707,129 @@ mod tests {
         let result = exec.execute(&module, 0).unwrap();
         assert_eq!(result.status, Status::Pass);
         assert_eq!(result.value.unwrap(), -1); // failure indicator
+    }
+
+    #[test]
+    fn test_e4_zext() {
+        // ZExt: zero-extend low 8 bits of 0xFFFFFF00 = 0x00 = 0
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+                    Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 2
+                    Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 4
+                    Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 8
+                    Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 16
+                    Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 32
+                    Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 64
+                    Instruction::IAdd { dst: 0, a: 0, b: 0 }, // r0 = 128 (0x80)
+                    Instruction::ZExt { dst: 1, a: 0 }, // r1 = 0x80 & 0xFF = 128
+                    Instruction::Ret { dst: 1 },
+                ],
+            }],
+            memory: vec![0u8; 64],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 128);
+    }
+
+    #[test]
+    fn test_e4_sext() {
+        // SExt: sign-extend -1 (0xFFFFFFFF) stays as -1
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+                    Instruction::INot { dst: 1, a: 0 }, // r1 = !1 = -2
+                    Instruction::SExt { dst: 2, a: 1 }, // r2 = -2 (sign-extended)
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![0u8; 64],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), -2);
+    }
+
+    #[test]
+    fn test_e4_memcopy() {
+        // MemCopy: use HostCall to set registers, fill addr 0, copy to addr 8, verify
+        let mut exec = E4Executor::default();
+        // id=0 returns 0, id=1 returns 8, id=2 returns 42
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        exec.host_functions_mut().register(|_args| E4Value::I32(8));
+        exec.host_functions_mut().register(|_args| E4Value::I32(42));
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    // r0 = 0 (src addr), r1 = 8 (dst addr), r2 = 42 (value)
+                    Instruction::HostCall { id: 0, args: vec![], results: vec![0] }, // r0 = 0
+                    Instruction::HostCall { id: 1, args: vec![], results: vec![1] }, // r1 = 8
+                    Instruction::HostCall { id: 2, args: vec![], results: vec![2] }, // r2 = 42
+                    // Store 42 at addr 0
+                    Instruction::StoreI64 { addr: 0, src: 2 }, // store r2(42) at addr r0(0)
+                    // MemCopy: dst=r1(8), src=r0(0), size=8
+                    Instruction::MemCopy { dst: 1, src: 0, size: 8 },
+                    // Load from addr 8
+                    Instruction::LoadI64 { dst: 3, addr: 1 }, // should be 42 (addr=r1=8)
+                    Instruction::Ret { dst: 3 },
+                ],
+            }],
+            memory: vec![0u8; 64],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 42);
+    }
+
+    #[test]
+    fn test_e4_memfill() {
+        // MemFill: use HostCall to set registers, fill addr 0 with 0x01 bytes, verify
+        let mut exec = E4Executor::default();
+        // id=0 returns 0, id=1 returns 1, id=2 returns 8
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        exec.host_functions_mut().register(|_args| E4Value::I32(1));
+        exec.host_functions_mut().register(|_args| E4Value::I32(8));
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    // r0 = 0 (addr), r1 = 1 (value), r2 = 8 (size)
+                    Instruction::HostCall { id: 0, args: vec![], results: vec![0] }, // r0 = 0
+                    Instruction::HostCall { id: 1, args: vec![], results: vec![1] }, // r1 = 1
+                    Instruction::HostCall { id: 2, args: vec![], results: vec![2] }, // r2 = 8
+                    // MemFill: addr=r0(0), value=r1(1), size=r2(8)
+                    Instruction::MemFill { addr: 0, value: 1, size: 8 },
+                    // Load as i64 then truncate to i32: 8 bytes of 0x01 → i32 = 0x01010101
+                    Instruction::LoadI64 { dst: 3, addr: 0 },
+                    Instruction::Ret { dst: 3 },
+                ],
+            }],
+            memory: vec![0u8; 64],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 0x01010101_i64);
     }
 }
