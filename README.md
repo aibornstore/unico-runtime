@@ -6,8 +6,8 @@ Rust execution runtime for the UNICO virtual machine (v3.0). Branch `yuriy` for 
 
 ```bash
 cargo build --lib
-cargo test --lib      # 292 unit tests
-cargo test            # + 16 integration tests + 3 doc tests = 311 total
+cargo test --lib      # 296 unit tests
+cargo test            # + 16 integration tests + 3 doc tests = 315 total
 cargo bench           # Criterion benchmarks (dev-dependency only)
 ```
 
@@ -19,7 +19,7 @@ cargo bench           # Criterion benchmarks (dev-dependency only)
 | E1 | ✅ Complete |
 | E2 | ✅ Complete |
 | E3 | ✅ Complete |
-| E4 | ✅ Complete (F64, integer arithmetic, bitwise ops, TableBr, MemGrow) |
+| E4 | ✅ Complete (F64, integer arithmetic, bitwise ops, ZExt/SExt, TableBr, MemGrow, MemCopy/MemFill) |
 | E5 (14/14) | ✅ All passing |
 | E6 (11/11) | ✅ All passing |
 | E7 (crypto) | ✅ Reconstructed, all crypto tests pass (AES-128/256, SHA-256, BLAKE2s, HMAC, HKDF, ChaCha20, Poly1305) |
@@ -30,7 +30,8 @@ cargo bench           # Criterion benchmarks (dev-dependency only)
 - **F64 floating-point**: FAdd, FSub, FMul, FDiv, FSqrt, FNeg, FAbs, FRound, FCmp, FImm
 - **Integer arithmetic**: IAdd, ISub, IMul, IDiv (with div-by-zero guard)
 - **Bitwise operations**: IAnd, IOr, IXor, INot, IClz, ICtz, IPopcnt, IRotl, IRotr
-- **Memory**: LoadI64, StoreI64, MemGrow (dynamic memory growth up to 1MB)
+- **Type conversions**: ZExt (zero-extend), SExt (sign-extend)
+- **Memory**: LoadI64, StoreI64, MemGrow (dynamic growth up to 1MB), MemCopy, MemFill
 - **Control flow**: Br, BrIf, Ret, Trap, Cmp, TableBr (indirect jump via jump tables)
 - **Host boundary**: HostCall with function registry (print, add, mul, sub, div, read, write)
 - **Binary format**: encode_e4/decode_e4 with magic "E4XX"
