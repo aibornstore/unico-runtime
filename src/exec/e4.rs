@@ -117,7 +117,7 @@ pub struct E4FunctionDef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct E4Module {
     pub functions: Vec<E4FunctionDef>,
-    pub memory: Vec<u8>, // 4096 bytes
+    pub memory: Vec<u8>, // 65536 bytes
     /// Jump tables for indirect jumps: tables[table_idx][index] = target_pc
     pub tables: Vec<Vec<u32>>,
 }
@@ -647,7 +647,7 @@ mod tests {
                 register_count: 16,
                 code,
             }],
-            memory: vec![0u8; 4096],
+            memory: vec![0u8; 65536],
             tables: vec![],
         }
     }
@@ -934,7 +934,7 @@ mod tests {
         let mut exec = E4Executor::default();
         let module = E4Module {
             functions: vec![],
-            memory: vec![0u8; 4096],
+            memory: vec![0u8; 65536],
             tables: vec![],
         };
         let result = exec.execute(&module, 0).unwrap();

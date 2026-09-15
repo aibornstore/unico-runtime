@@ -1100,7 +1100,7 @@ mod tests {
                     Instruction::Ret { dst: 2 },
                 ],
             }],
-            memory: vec![0u8; 4096],
+            memory: vec![0u8; 65536],
             tables: vec![],
         };
         let module2 = E4Module {
@@ -1115,7 +1115,7 @@ mod tests {
                     Instruction::Ret { dst: 2 },
                 ],
             }],
-            memory: vec![0u8; 4096],
+            memory: vec![0u8; 65536],
             tables: vec![],
         };
         let bytes1 = encode_e4(&module1);
