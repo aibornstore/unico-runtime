@@ -5038,3 +5038,230 @@ fn test_e7_execute_cpy_zero_count() {
     let out = exec.vregs.get(0);
     assert_eq!(out.len(), 0, "Cpy with count=0 should produce empty output");
 }
+
+#[test]
+fn test_e7_execute_poly1305_wrong_slot_type() {
+    // Poly1305 with AES slot type should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::StoreAes128Key { slot: 1, src: 1 },
+        Instruction::Poly1305 { dst: 0, msg: 2, count: 1 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 16]); // AES key (wrong type for Poly1305)
+    exec.vregs.store_vreg(2, b"Test message");
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Poly1305 with wrong slot type should error");
+}
+
+#[test]
+fn test_e7_execute_aes_encrypt_short_block() {
+    // AES encrypt with input < 16 bytes should error (handled by slot.encrypt)
+    let module = make_module(vec![make_func(vec![
+        Instruction::StoreAes128Key { slot: 0, src: 1 },
+        Instruction::Aes128Enc { dst: 2, src: 3, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 16]); // valid key
+    exec.vregs.store_vreg(3, &[0u8; 8]); // short input, need 16 bytes
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "AES with short input should error");
+}
+
+#[test]
+fn test_e7_execute_aes256_encrypt_short_block() {
+    // AES256 encrypt with input < 16 bytes should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::StoreAes256Key { slot: 0, src: 1 },
+        Instruction::Aes256Enc { dst: 2, src: 3, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 32]); // valid key
+    exec.vregs.store_vreg(3, &[0u8; 4]); // short input, need 16 bytes
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "AES256 with short input should error");
+}
+
+#[test]
+fn test_e7_execute_aes_decrypt_short_block() {
+    // AES decrypt with input < 16 bytes should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::StoreAes128Key { slot: 0, src: 1 },
+        Instruction::Aes128Dec { dst: 2, src: 3, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 16]); // valid key
+    exec.vregs.store_vreg(3, &[0u8; 10]); // short input, need 16 bytes
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "AES128Dec with short input should error");
+}
+
+#[test]
+fn test_e7_execute_aes256_decrypt_short_block() {
+    // AES256 decrypt with input < 16 bytes should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::StoreAes256Key { slot: 0, src: 1 },
+        Instruction::Aes256Dec { dst: 2, src: 3, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 32]); // valid key
+    exec.vregs.store_vreg(3, &[0u8; 12]); // short input, need 16 bytes
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "AES256Dec with short input should error");
+}
+
+#[test]
+fn test_e7_execute_chacha20_only_nonce() {
+    // ChaCha20 with msg exactly 12 bytes (only nonce, empty plaintext) succeeds
+    let module = make_module(vec![make_func(vec![
+        Instruction::StoreChaCha20Key { slot: 0, src: 1 },
+        Instruction::ChaCha20 { dst: 2, msg: 3, nonce: 4, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 32]); // valid key
+    exec.vregs.store_vreg(3, &[0u8; 12]); // exactly 12 bytes = only nonce, empty plaintext
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    // Encrypting empty plaintext produces empty output
+    let out = exec.vregs.get(2);
+    assert_eq!(out.len(), 0, "ChaCha20 with empty plaintext should produce empty output");
+}
+
+#[test]
+fn test_e7_execute_chacha20_short_key() {
+    // ChaCha20 keygen with short key should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::StoreChaCha20Key { slot: 0, src: 1 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 16]); // short key, need 32 bytes
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "ChaCha20 with short key should error");
+}
+
+#[test]
+fn test_e7_execute_poly1305_short_key() {
+    // Poly1305 with short key should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::StorePoly1305Key { slot: 0, src: 1 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 16]); // short key, need 32 bytes
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Poly1305 with short key should error");
+}
+
+#[test]
+fn test_e7_execute_ecdh_short_priv() {
+    // ECDH with short private key should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Ecdh { dst: 0, priv_key: 1, pub_key_x: 2, pub_key_y: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 16]); // short priv key, need 32 bytes
+    exec.vregs.store_vreg(2, &[0u8; 32]); // valid pub key x
+    exec.vregs.store_vreg(3, &[0u8; 32]); // valid pub key y
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "ECDH with short private key should error");
+}
+
+#[test]
+fn test_e7_execute_ecdh_short_pub_x() {
+    // ECDH with short public key x should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Ecdh { dst: 0, priv_key: 1, pub_key_x: 2, pub_key_y: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 32]); // valid priv key
+    exec.vregs.store_vreg(2, &[0u8; 16]); // short pub key x, need 32 bytes
+    exec.vregs.store_vreg(3, &[0u8; 32]); // valid pub key y
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "ECDH with short pub key x should error");
+}
+
+#[test]
+fn test_e7_execute_kyber768_encaps_short_pk() {
+    // Kyber768 encaps with short public key should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Kyber768Encaps { ct: 0, ss: 1, pk: 2, msg: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(2, &[0u8; 100]); // short pk, need 1152 bytes
+    exec.vregs.store_vreg(3, &[0u8; 32]); // valid msg
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Kyber768 encaps with short pk should error");
+}
+
+#[test]
+fn test_e7_execute_kyber768_decaps_short_ct() {
+    // Kyber768 decaps with short ciphertext should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Kyber768Decaps { ss: 0, sk: 1, ct: 2 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 2400]); // valid sk
+    exec.vregs.store_vreg(2, &[0u8; 100]); // short ct, need 1088 bytes
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Kyber768 decaps with short ct should error");
+}
+
+#[test]
+fn test_e7_execute_dilithium2_verify_short_pk() {
+    // Dilithium2 verify with short public key should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Dilithium2Verify { ok: 0, sig: 1, msg: 2, pk: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 2420]); // valid sig
+    exec.vregs.store_vreg(2, b"Test"); // valid msg
+    exec.vregs.store_vreg(3, &[0u8; 100]); // short pk, need 1312 bytes
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Dilithium2 verify with short pk should error");
+}
+
+#[test]
+fn test_e7_execute_rsa2048_keygen_valid() {
+    // RSA2048 keygen with valid inputs should succeed
+    let module = make_module(vec![make_func(vec![
+        Instruction::Rsa2048KeyGen { pk: 0, sk: 1, seed: 2 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(2, &[0u8; 32]); // valid seed
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let pk = exec.vregs.get(0);
+    let sk = exec.vregs.get(1);
+    assert_eq!(pk.len(), 256, "RSA public key should be 256 bytes");
+    assert_eq!(sk.len(), 256, "RSA private key should be 256 bytes");
+}
+
+#[test]
+fn test_e7_execute_mulmod_m128_zero() {
+    // MulMod with m=0 explicitly set (first 16 bytes are zero)
+    let module = make_module(vec![make_func(vec![
+        Instruction::MulMod { dst: 0, a: 1, b: 2, m: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0xFFu8; 32]); // a = max
+    exec.vregs.store_vreg(2, &[0xFFu8; 32]); // b = max
+    exec.vregs.store_vreg(3, &[0u8; 32]); // m = 0
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    let expected: &[u8] = &[0u8; 16];
+    assert_eq!(&out[..16], expected, "MulMod with m=0 should return 0");
+}
