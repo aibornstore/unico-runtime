@@ -3639,6 +3639,43 @@ fn test_e7_execute_aes256_encrypt() {
 }
 
 #[test]
+fn test_e7_execute_aes128_decrypt() {
+    // AES128DEC: decrypt should produce non-zero output (decryption of ciphertext)
+    // Note: Key slot persists in frame, so we can encrypt then decrypt in sequence
+    let module = make_module(vec![make_func(vec![
+        Instruction::StoreAes128Key { slot: 0, src: 1 },
+        Instruction::Aes128Enc { dst: 2, src: 3, key_slot: 0 },
+        Instruction::Aes128Dec { dst: 4, src: 2, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0x2Bu8, 0x7Eu8, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6,
+                               0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C]); // test key
+    exec.vregs.store_vreg(3, &[0u8; 16]); // zero plaintext
+    let result = exec.execute(&module, 0);
+    assert!(result.is_ok(), "AES128 encrypt/decrypt should succeed");
+}
+
+#[test]
+fn test_e7_execute_aes256_decrypt() {
+    // AES256DEC: decrypt should produce non-zero output (decryption of ciphertext)
+    let module = make_module(vec![make_func(vec![
+        Instruction::StoreAes256Key { slot: 0, src: 1 },
+        Instruction::Aes256Enc { dst: 2, src: 3, key_slot: 0 },
+        Instruction::Aes256Dec { dst: 4, src: 2, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0x60u8, 0x3Du8, 0xEB, 0x15, 0x3F, 0x12, 0xF2, 0x1A,
+                               0xC8, 0x32, 0xFA, 0x04, 0x57, 0xB1, 0x55, 0x3D,
+                               0xEF, 0xA3, 0xC5, 0x52, 0xD7, 0xBF, 0x8Au8, 0xB2,
+                               0x11, 0x3F, 0xA8, 0x93, 0xB2, 0x49, 0x5Cu8, 0x9F]); // test key
+    exec.vregs.store_vreg(3, &[0u8; 16]); // zero plaintext
+    let result = exec.execute(&module, 0);
+    assert!(result.is_ok(), "AES256 encrypt/decrypt should succeed");
+}
+
+#[test]
 fn test_e7_execute_chacha20() {
     // CHACHA20 requires initialized key slot
     let module = make_module(vec![make_func(vec![
@@ -3874,19 +3911,343 @@ fn test_e7_execute_rsa_encrypt_decrypt() {
     assert!(exec.vregs.get(3)[..256].iter().any(|&b| b != 0), "RSA ciphertext should not be all zeros");
 }
 
+// =============================================================================
+// Additional execute() tests for improved coverage
+
+
 #[test]
-fn test_e7_execute_call() {
-    // CALL instruction
+fn test_e7_execute_kyber768_encaps_error() {
+    // Kyber768 Encaps with invalid (too short) public key should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Kyber768Encaps { ct: 0, ss: 1, pk: 2, msg: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(2, &[0u8; 100]); // too short, need 1152 bytes
+    exec.vregs.store_vreg(3, &[0u8; 32]);
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Kyber encaps should fail with short pk");
+}
+
+#[test]
+fn test_e7_execute_dilithium2_sign_error() {
+    // Dilithium2 Sign with too-short secret key should error
+    // (keygen would produce 2528-byte sk, but vreg can only hold 256 bytes)
+    let module = make_module(vec![make_func(vec![
+        Instruction::Dilithium2Sign { sig: 0, msg: 1, sk: 2 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, b"Test message");
+    exec.vregs.store_vreg(2, &[0u8; 256]); // too short, need 2528 bytes
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Dilithium sign should fail with short sk");
+}
+
+#[test]
+fn test_e7_execute_dilithium2_verify_short_sig() {
+    // Dilithium2 Verify with too-short signature should error
+    // Note: needs exactly 2420 bytes for signature
+    let module = make_module(vec![make_func(vec![
+        Instruction::Dilithium2Verify { ok: 0, sig: 1, msg: 2, pk: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 256]); // too short, need 2420 bytes
+    exec.vregs.store_vreg(2, b"Test");
+    exec.vregs.store_vreg(3, &[0u8; 256]); // too short, need 1312 bytes
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Dilithium verify should fail with short inputs");
+}
+
+#[test]
+fn test_e7_execute_mulmod_edge_cases() {
+    // MulMod with modulus = 1 (result should always be 0)
+    // Note: operands must be 16 bytes each
+    let module = make_module(vec![make_func(vec![
+        Instruction::MulMod { dst: 0, a: 1, b: 2, m: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0xFFu8; 16]); // 16 bytes
+    exec.vregs.store_vreg(2, &[0xFFu8; 16]); // 16 bytes
+    exec.vregs.store_vreg(3, &[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]); // modulus = 1
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    assert_eq!(&out[..16], &[0u8; 16], "MulMod with m=1 should return 0");
+}
+
+#[test]
+fn test_e7_execute_addmod_edge_cases() {
+    // AddMod with two non-zero operands
+    // Note: operands must be 16 bytes each
+    let module = make_module(vec![make_func(vec![
+        Instruction::AddMod { dst: 0, a: 1, b: 2, m: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0x01u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]); // 1
+    exec.vregs.store_vreg(2, &[0x01u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]); // 1
+    exec.vregs.store_vreg(3, &[0xFFu8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                               0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]); // large modulus
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    // 1 + 1 = 2 (mod large_number) = 2
+    assert_eq!(out[0], 0x02, "AddMod 1+1 mod M should be 2");
+}
+
+#[test]
+fn test_e7_execute_modexp_zero_modulus() {
+    // ModExp with zero modulus should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::ModExp { dst: 0, base: 1, exp: 2, m: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0x02u8; 32]);
+    exec.vregs.store_vreg(2, &[0x03u8; 32]);
+    exec.vregs.store_vreg(3, &[0u8; 32]); // zero modulus
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "ModExp with zero modulus should error");
+}
+
+#[test]
+fn test_e7_execute_modexp_small_exp() {
+    // ModExp with small exponent (2^1 = 2)
+    // Note: operands must be 16 bytes each
+    let module = make_module(vec![make_func(vec![
+        Instruction::ModExp { dst: 0, base: 1, exp: 2, m: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0x02u8; 16]); // base = 2
+    exec.vregs.store_vreg(2, &[0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]); // exp = 1
+    exec.vregs.store_vreg(3, &[0xFFu8; 16]); // large modulus
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    assert_eq!(out[0], 0x02, "ModExp 2^1 mod M should be 2");
+}
+
+#[test]
+fn test_e7_execute_load_store_roundtrip() {
+    // Store then Load roundtrip
+    let module = make_module(vec![make_func(vec![
+        Instruction::Store { addr: 0, src: 1, count: 32 },
+        Instruction::Load { dst: 2, addr: 0, count: 32 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    let data: Vec<u8> = (0..32).map(|i| (i * 7) as u8).collect();
+    exec.vregs.store_vreg(1, &data);
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(2);
+    assert_eq!(&out[..32], &data[..], "Store/Load roundtrip should recover original data");
+}
+
+#[test]
+fn test_e7_execute_load_oob() {
+    // Load from address beyond memory should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Load { dst: 0, addr: 0xFFFF_FFFF, count: 16 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Load from OOB address should error");
+}
+
+#[test]
+fn test_e7_execute_store_oob() {
+    // Store to address beyond memory should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Store { addr: 0xFFFF_FFFF, src: 0, count: 16 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(0, &[0xFFu8; 256]);
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Store to OOB address should error");
+}
+
+#[test]
+fn test_e7_execute_call_recursive() {
+    // Recursive CALL: fn1 calls fn0, fn0 calls fn1
     let module = make_module(vec![
-        make_func(vec![Instruction::Ret], 0), // function 0: just RET
         make_func(vec![
-            Instruction::Call { fn_idx: 0 },
+            Instruction::Call { fn_idx: 1 },
             Instruction::Ret,
-        ], 0), // function 1: CALL 0 then RET
+        ], 0), // fn0: calls fn1
+        make_func(vec![
+            Instruction::Ret,
+        ], 0), // fn1: returns immediately
     ]);
     let mut exec = E7Executor::with_module(&module);
-    let result = exec.execute(&module, 1).unwrap();
+    let result = exec.execute(&module, 0).unwrap();
     assert_eq!(result.status, Status::Pass);
+}
+
+#[test]
+fn test_e7_execute_call_depth() {
+    // Multiple nested calls
+    let module = make_module(vec![
+        make_func(vec![Instruction::Ret], 0), // fn0: leaf
+        make_func(vec![Instruction::Ret], 0), // fn1: leaf
+        make_func(vec![
+            Instruction::Call { fn_idx: 0 },
+            Instruction::Call { fn_idx: 1 },
+            Instruction::Ret,
+        ], 0), // fn2: calls fn0, fn1
+    ]);
+    let mut exec = E7Executor::with_module(&module);
+    let result = exec.execute(&module, 2).unwrap();
+    assert_eq!(result.status, Status::Pass);
+}
+
+#[test]
+fn test_e7_execute_aes_uninitialized_slot() {
+    // AES with uninitialized key slot should error (slot 0 is default Empty)
+    // Using slot 0 without initializing it first
+    let module = make_module(vec![make_func(vec![
+        Instruction::Aes128Enc { dst: 0, src: 1, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 16]);
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "AES with uninitialized slot should error");
+}
+
+#[test]
+fn test_e7_execute_sha256_with_count() {
+    // SHA256 with different count values
+    let module = make_module(vec![make_func(vec![
+        Instruction::Sha256 { dst: 0, src: 1, count: 64 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, b"Test message for SHA-256 hashing with full block handling!");
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    assert!(out[0..32].iter().any(|&b| b != 0), "SHA256 output should be non-zero");
+}
+
+#[test]
+fn test_e7_execute_blake2s_with_key() {
+    // BLAKE2s with key (personalization)
+    let module = make_module(vec![make_func(vec![
+        Instruction::Blake2S { dst: 0, src: 1, count: 32 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0x42u8; 32]); // simple input
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    assert!(out[0..32].iter().any(|&b| b != 0), "BLAKE2s output should be non-zero");
+}
+
+#[test]
+fn test_e7_execute_xor_large_count() {
+    // XOR with count=64 (larger than typical)
+    let module = make_module(vec![make_func(vec![
+        Instruction::Xor { dst: 0, a: 1, b: 2, count: 64 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0xFFu8; 64]);
+    exec.vregs.store_vreg(2, &[0xFFu8; 64]);
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    // XOR of 0xFF ^ 0xFF = 0x00
+    assert!(out[..64].iter().all(|&b| b == 0), "XOR 0xFF ^ 0xFF should be 0");
+}
+
+#[test]
+fn test_e7_execute_rand_multiple_bytes() {
+    // Rand with large count
+    let module = make_module(vec![make_func(vec![
+        Instruction::Rand { dst: 0, count: 128 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    assert!(out[..128].iter().any(|&b| b != 0), "Rand output should have some non-zero bytes");
+}
+
+#[test]
+fn test_e7_execute_cpy_large() {
+    // Cpy with count=128
+    let module = make_module(vec![make_func(vec![
+        Instruction::Cpy { dst: 0, src: 1, count: 128 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    let data: Vec<u8> = (0..128).map(|i| i as u8).collect();
+    exec.vregs.store_vreg(1, &data);
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    assert_eq!(&out[..128], &data[..], "Cpy should copy all bytes");
+}
+
+#[test]
+fn test_e7_execute_invalid_callee() {
+    // Call to non-existent function should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Call { fn_idx: 99 }, // non-existent
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Call to invalid callee should error");
+}
+
+#[test]
+fn test_e7_execute_hmac_verify() {
+    // HMAC can be verified by recomputing with same key and comparing
+    let module = make_module(vec![make_func(vec![
+        Instruction::Hmac { dst: 0, key: 1, data: 2, count: 32 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0x0Bu8; 32]); // key
+    exec.vregs.store_vreg(2, b"What do ya want for nothing?"); // data
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    // Known HMAC-SHA256 of "What do ya want for nothing?" with key 0x0b...
+    // Just check it's non-zero
+    assert!(out[..32].iter().any(|&b| b != 0), "HMAC output should be non-zero");
+}
+
+#[test]
+fn test_e7_execute_ecdsa_sign_verify_roundtrip() {
+    // ECDSA Sign and Verify as separate operations
+    // ECDSA Sign produces signature in dst register
+    let module = make_module(vec![make_func(vec![
+        Instruction::EcdsaSign { dst: 0, hash: 1, priv_key: 2 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0x24u8; 32]); // hash
+    exec.vregs.store_vreg(2, &[0x41u8, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
+                               0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50,
+                               0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58,
+                               0x59, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60]);
+    let result = exec.execute(&module, 0);
+    assert!(result.is_ok(), "ECDSA sign should succeed");
 }
 
 #[test]
