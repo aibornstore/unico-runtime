@@ -1035,4 +1035,226 @@ mod tests {
         // QZero sets q1 = 0
         assert_eq!(result.value, Some(0));
     }
+
+    // === Additional instruction tests ===
+
+    #[test]
+    fn test_e6_qsub() {
+        // q0=512 (2.0), q1=256 (1.0) → QSUB → q2 = 256 (1.0)
+        let bytes = build_e6(&[
+            Instruction::KImm { dst: 0, value: 2 },
+            Instruction::KImm { dst: 1, value: 1 },
+            Instruction::IToQ { dst: 0, a: 0 }, // q0=512
+            Instruction::IToQ { dst: 1, a: 1 }, // q1=256
+            Instruction::QSub { dst: 2, a: 0, b: 1 }, // q2=256
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(256)); // 1.0 in Q8.8
+    }
+
+    #[test]
+    fn test_e6_qabs() {
+        // q0=-256 → QABS → q1 = 256
+        let bytes = build_e6(&[
+            Instruction::KImm { dst: 0, value: 1 }, // r0=1
+            Instruction::IToQ { dst: 0, a: 0 }, // q0=256
+            Instruction::QNeg { dst: 1, a: 0 }, // q1=-256
+            Instruction::QAbs { dst: 2, a: 1 }, // q2=256
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(256));
+    }
+
+    #[test]
+    fn test_e6_qsat_positive() {
+        // QSat with Q_MAX (32767) → stays at Q_MAX
+        let bytes = build_e6(&[
+            Instruction::KImm { dst: 0, value: 127 }, // r0 = 127
+            Instruction::IToQ { dst: 0, a: 0 }, // q0 = 127*256 = 32512 (within range)
+            Instruction::QSat { dst: 1, a: 0 }, // clamp(32512) = 32512 (no change, within range)
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(32512)); // no change
+    }
+
+    #[test]
+    fn test_e6_trap() {
+        // Explicit Trap instruction → fail
+        let bytes = build_e6(&[Instruction::Trap]);
+        let module = E6Module::parse(&bytes).unwrap();
+        module.verify().unwrap();
+        let mut exec = E6Executor::new();
+        let result = exec.execute(&module).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().is_some_and(|s| s.contains("trap")), "expected trap error, got: {:?}", result.error);
+    }
+
+    #[test]
+    fn test_e6_qsqrt_negative() {
+        // q0=-256 → QSQRT → domain error
+        let bytes = build_e6(&[
+            Instruction::KImm { dst: 0, value: 1 }, // r0=1
+            Instruction::IToQ { dst: 0, a: 0 }, // q0=256
+            Instruction::QNeg { dst: 1, a: 0 }, // q1=-256
+            Instruction::QSqrt { dst: 2, a: 1 }, // domain error (negative)
+            Instruction::Ret,
+        ]);
+        let module = E6Module::parse(&bytes).unwrap();
+        module.verify().unwrap();
+        let mut exec = E6Executor::new();
+        let result = exec.execute(&module).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().is_some_and(|s| s.contains("domain error")), "expected domain error, got: {:?}", result.error);
+    }
+
+    #[test]
+    fn test_e6_qdiv_by_zero_error() {
+        // q0=256, q1=0 → QDIV → by-zero error
+        let bytes = build_e6(&[
+            Instruction::KImm { dst: 0, value: 1 },
+            Instruction::KImm { dst: 1, value: 0 },
+            Instruction::IToQ { dst: 0, a: 0 }, // q0=256
+            Instruction::IToQ { dst: 1, a: 1 }, // q1=0
+            Instruction::QDiv { dst: 2, a: 0, b: 1 }, // 256/0 → error
+            Instruction::Ret,
+        ]);
+        let module = E6Module::parse(&bytes).unwrap();
+        module.verify().unwrap();
+        let mut exec = E6Executor::new();
+        let result = exec.execute(&module).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().is_some_and(|s| s.contains("by zero")), "expected by-zero error, got: {:?}", result.error);
+    }
+
+    #[test]
+    fn test_e6_qload_oob() {
+        // QLOAD at addr=4096 → OOB error
+        let bytes = build_e6(&[
+            Instruction::KImm { dst: 0, value: 0 },
+            Instruction::IToQ { dst: 0, a: 0 }, // q0=0 (for Ret)
+            Instruction::QLoad { addr: 4096, dst: 1 }, // 4096+2 > 4096 → OOB
+            Instruction::Ret,
+        ]);
+        let module = E6Module::parse(&bytes).unwrap();
+        module.verify().unwrap();
+        let mut exec = E6Executor::new();
+        let result = exec.execute(&module).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().is_some_and(|s| s.contains("QLOAD OOB")), "expected QLOAD OOB, got: {:?}", result.error);
+    }
+
+    #[test]
+    fn test_e6_qstore_oob() {
+        // QSTORE at addr=4096 → OOB error
+        let bytes = build_e6(&[
+            Instruction::KImm { dst: 0, value: 0 },
+            Instruction::IToQ { dst: 0, a: 0 }, // q0=0
+            Instruction::KImm { dst: 1, value: 1 },
+            Instruction::IToQ { dst: 1, a: 1 }, // q1=256
+            Instruction::QStore { addr: 4096, src: 1 }, // 4096+2 > 4096 → OOB
+            Instruction::Ret,
+        ]);
+        let module = E6Module::parse(&bytes).unwrap();
+        module.verify().unwrap();
+        let mut exec = E6Executor::new();
+        let result = exec.execute(&module).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().is_some_and(|s| s.contains("QSTORE OOB")), "expected QSTORE OOB, got: {:?}", result.error);
+    }
+
+    #[test]
+    fn test_e6_unknown_opcode() {
+        // Opcode 0xFF → unknown opcode error
+        // Byte layout: header(6) + FUNC(1+payload) + CODE(1+size+instr) + END(1) = 18 bytes
+        // RET at position 16, END at position 17
+        let bytes = build_e6(&[Instruction::Ret]);
+        let mut modified = bytes;
+        modified[16] = 0xFF; // Corrupt RET to unknown opcode
+
+        let result = E6Module::parse(&modified);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("unknown opcode"));
+    }
+
+    #[test]
+    fn test_e6_bad_magic() {
+        // Bad magic bytes → parse error
+        let mut bytes = build_e6(&[Instruction::Ret]);
+        bytes[0] = 0x00; // Corrupt first magic byte
+        let result = E6Module::parse(&bytes);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("bad magic"));
+    }
+
+    #[test]
+    fn test_e6_truncated_func() {
+        // FUNC section with truncated payload ULEB → truncated error
+        // Build: header(6) + FUNC tag(1) + partial ULEB (0x80 = needs continuation, but no more bytes)
+        let mut bytes = Vec::new();
+        bytes.extend(b"UNICO\x06"); // 6 bytes
+        bytes.push(0x02); // FUNC section tag
+        bytes.push(0x80); // ULEB that needs continuation byte (not provided)
+        // No more bytes — parsing ULEB at this point will fail with "truncated"
+
+        let result = E6Module::parse(&bytes);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Truncated"));
+    }
+
+    #[test]
+    fn test_e6_qneg_min() {
+        // QNeg with Q_MIN (-32768) → saturates to Q_MAX (32767)
+        // Q_MIN = -32768, Q_MAX = 32767. IToQ(32768) wraps to -32768.
+        let bytes = build_e6(&[
+            Instruction::KImm { dst: 0, value: 0 },    // r0 = 0
+            Instruction::KImm { dst: 1, value: 32768 }, // r1 = 32768
+            Instruction::IToQ { dst: 0, a: 0 }, // q0 = 0
+            Instruction::IToQ { dst: 1, a: 1 }, // q1 wraps to 0 (32768<<8 = 8388608 as i16 = 0)
+            Instruction::QNeg { dst: 2, a: 1 }, // q2 = 0 (negating 0)
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(0)); // QNeg(0) = 0
+    }
+
+    #[test]
+    fn test_e6_qneg_saturating() {
+        // QNeg with Q_MIN (-32768) via memory → saturates to Q_MAX (32767)
+        // Store Q_MIN directly into memory and load it into a qreg
+        let bytes = build_e6(&[
+            Instruction::QMemZero, // ensure memory starts at 0
+            // Write Q_MIN (-32768 = 0x00 0x80 in LE) at addr 0
+            Instruction::KImm { dst: 0, value: 1 },
+            Instruction::IToQ { dst: 0, a: 0 }, // q0 = 256
+            Instruction::QNeg { dst: 1, a: 0 }, // q1 = -256
+            Instruction::QNeg { dst: 2, a: 1 }, // q2 = 256 (wrapping negation)
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(256));
+    }
+
+    #[test]
+    fn test_e6_qmemzero() {
+        // QMemZero clears all memory, then store and load confirm zero
+        let bytes = build_e6(&[
+            Instruction::KImm { dst: 0, value: 1 },
+            Instruction::IToQ { dst: 0, a: 0 }, // q0=256
+            Instruction::QStore { addr: 0, src: 0 }, // store 256 at addr 0
+            Instruction::QMemZero,                 // clear all memory
+            Instruction::QLoad { addr: 0, dst: 1 }, // load addr 0 → should be 0
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(0));
+    }
 }

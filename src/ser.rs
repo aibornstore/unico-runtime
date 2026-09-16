@@ -3221,7 +3221,7 @@ mod tests {
         
         let decoded = decode(&encode(&module)).unwrap();
         assert_eq!(decoded.regions.len(), 2);
-        if let U30Op::MemCopy { dst_region, dst_offset, src_region, src_offset, size } = &decoded.functions[0].blocks[0].ops[0] {
+        if let U30Op::MemCopy { dst_region, dst_offset: _, src_region, src_offset: _, size } = &decoded.functions[0].blocks[0].ops[0] {
             assert_eq!(*dst_region, 0);
             assert_eq!(*src_region, 1);
             assert_eq!(*size, 16);
@@ -3807,5 +3807,506 @@ mod tests {
         } else {
             panic!("Expected RotrU32 op");
         }
+    }
+
+    // Test roundtrip for Abs, Neg, Ctz, Clz, Popcnt ops
+    #[test]
+    fn test_ser_encode_decode_bitwise_unary_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::AbsU64 { dst: 1, src: 0 },
+                        U30Op::NegU64 { dst: 2, src: 0 },
+                        U30Op::CtzU64 { dst: 3, src: 0 },
+                        U30Op::ClzU64 { dst: 4, src: 0 },
+                        U30Op::PopcntU64 { dst: 5, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1, 2, 3, 4, 5] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 6);
+        assert!(matches!(decoded.functions[0].blocks[0].ops[1], U30Op::AbsU64 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[2], U30Op::NegU64 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[3], U30Op::CtzU64 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[4], U30Op::ClzU64 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[5], U30Op::PopcntU64 { .. }));
+    }
+
+    // Test roundtrip for RotlU64 and RotrU64
+    #[test]
+    fn test_ser_encode_decode_rot_u64_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0x8000_0000_0000_0000u64) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(4) },
+                        U30Op::RotlU64 { dst: 2, val: 0, sh: 1 },
+                        U30Op::RotrU64 { dst: 3, val: 0, sh: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2, 3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert!(matches!(decoded.functions[0].blocks[0].ops[2], U30Op::RotlU64 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[3], U30Op::RotrU64 { .. }));
+    }
+
+    // Test roundtrip for NotU16, NotU32, NotU64
+    #[test]
+    fn test_ser_encode_decode_not_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U16(0xFF) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0xFFFF) },
+                        U30Op::Const { dst: 2, value: U30Value::U64(0xFFFF_FFFF_FFFF_FFFFu64) },
+                        U30Op::NotU16 { dst: 3, src: 0 },
+                        U30Op::NotU32 { dst: 4, src: 1 },
+                        U30Op::NotU64 { dst: 5, src: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![3, 4, 5] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert!(matches!(decoded.functions[0].blocks[0].ops[3], U30Op::NotU16 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[4], U30Op::NotU32 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[5], U30Op::NotU64 { .. }));
+    }
+
+    // Test roundtrip for ZExt variants
+    #[test]
+    fn test_ser_encode_decode_zext_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U8(42) },
+                        U30Op::ZExtI8U16 { dst: 1, src: 0 },
+                        U30Op::ZExtI8U32 { dst: 2, src: 0 },
+                        U30Op::ZExtI8U64 { dst: 3, src: 0 },
+                        U30Op::ZExtI16U32 { dst: 4, src: 1 },
+                        U30Op::ZExtI16U64 { dst: 5, src: 1 },
+                        U30Op::ZExtI32U64 { dst: 6, src: 4 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1, 2, 3, 4, 5, 6] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert!(matches!(decoded.functions[0].blocks[0].ops[1], U30Op::ZExtI8U16 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[2], U30Op::ZExtI8U32 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[3], U30Op::ZExtI8U64 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[4], U30Op::ZExtI16U32 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[5], U30Op::ZExtI16U64 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[6], U30Op::ZExtI32U64 { .. }));
+    }
+
+    // Test roundtrip for SExt variants
+    #[test]
+    fn test_ser_encode_decode_sext_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U8(0xFF) },
+                        U30Op::Const { dst: 1, value: U30Value::U16(0xFFFF) },
+                        U30Op::Const { dst: 2, value: U30Value::U32(0xFFFF_FFFF) },
+                        U30Op::SExtI8U16 { dst: 3, src: 0 },
+                        U30Op::SExtI8U32 { dst: 4, src: 0 },
+                        U30Op::SExtI8U64 { dst: 5, src: 0 },
+                        U30Op::SExtI16U32 { dst: 6, src: 1 },
+                        U30Op::SExtI16U64 { dst: 7, src: 1 },
+                        U30Op::SExtI32U64 { dst: 8, src: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![3, 4, 5, 6, 7, 8] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert!(matches!(decoded.functions[0].blocks[0].ops[3], U30Op::SExtI8U16 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[4], U30Op::SExtI8U32 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[5], U30Op::SExtI8U64 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[6], U30Op::SExtI16U32 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[7], U30Op::SExtI16U64 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[8], U30Op::SExtI32U64 { .. }));
+    }
+
+    // Test roundtrip for ByteSwap variants
+    #[test]
+    fn test_ser_encode_decode_byteswap_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U16(0x1234) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0x1234_5678) },
+                        U30Op::Const { dst: 2, value: U30Value::U64(0x0123_4567_89AB_CDEF) },
+                        U30Op::ByteSwapU16 { dst: 3, src: 0 },
+                        U30Op::ByteSwapU32 { dst: 4, src: 1 },
+                        U30Op::ByteSwapU64 { dst: 5, src: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![3, 4, 5] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert!(matches!(decoded.functions[0].blocks[0].ops[3], U30Op::ByteSwapU16 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[4], U30Op::ByteSwapU32 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[5], U30Op::ByteSwapU64 { .. }));
+    }
+
+    // Test roundtrip for F32 comparison ops
+    #[test]
+    fn test_ser_encode_decode_f32_cmp_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(1.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F32(2.0) },
+                        U30Op::FEq { dst: 2, a: 0, b: 1 },
+                        U30Op::FLt { dst: 3, a: 0, b: 1 },
+                        U30Op::FGt { dst: 4, a: 0, b: 1 },
+                        U30Op::FLe { dst: 5, a: 0, b: 1 },
+                        U30Op::FGe { dst: 6, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2, 3, 4, 5, 6] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert!(matches!(decoded.functions[0].blocks[0].ops[2], U30Op::FEq { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[3], U30Op::FLt { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[4], U30Op::FGt { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[5], U30Op::FLe { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[6], U30Op::FGe { .. }));
+    }
+
+    // Test roundtrip for F32 arithmetic ops
+    #[test]
+    fn test_ser_encode_decode_f32_arith_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(3.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F32(2.0) },
+                        U30Op::FAdd { dst: 2, a: 0, b: 1 },
+                        U30Op::FSub { dst: 3, a: 0, b: 1 },
+                        U30Op::FMul { dst: 4, a: 0, b: 1 },
+                        U30Op::FDiv { dst: 5, a: 0, b: 1 },
+                        U30Op::FSqrt { dst: 6, src: 0 },
+                        U30Op::FAbs { dst: 7, src: 0 },
+                        U30Op::FNeg { dst: 8, src: 0 },
+                        U30Op::FMin { dst: 9, a: 0, b: 1 },
+                        U30Op::FMax { dst: 10, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2, 3, 4, 5, 6, 7, 8, 9, 10] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert!(matches!(decoded.functions[0].blocks[0].ops[2], U30Op::FAdd { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[3], U30Op::FSub { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[4], U30Op::FMul { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[5], U30Op::FDiv { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[6], U30Op::FSqrt { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[7], U30Op::FAbs { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[8], U30Op::FNeg { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[9], U30Op::FMin { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[10], U30Op::FMax { .. }));
+    }
+
+    // Test roundtrip for F64 comparison ops
+    #[test]
+    fn test_ser_encode_decode_f64_cmp_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(2.0) },
+                        U30Op::F64Eq { dst: 2, a: 0, b: 1 },
+                        U30Op::F64Lt { dst: 3, a: 0, b: 1 },
+                        U30Op::F64Gt { dst: 4, a: 0, b: 1 },
+                        U30Op::F64Le { dst: 5, a: 0, b: 1 },
+                        U30Op::F64Ge { dst: 6, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2, 3, 4, 5, 6] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert!(matches!(decoded.functions[0].blocks[0].ops[2], U30Op::F64Eq { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[3], U30Op::F64Lt { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[4], U30Op::F64Gt { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[5], U30Op::F64Le { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[6], U30Op::F64Ge { .. }));
+    }
+
+    // Test roundtrip for I64F64 and F64I64
+    #[test]
+    fn test_ser_encode_decode_i64_f64_conversions() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::I64F64 { dst: 1, src: 0 },
+                        U30Op::F64I64 { dst: 2, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1, 2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert!(matches!(decoded.functions[0].blocks[0].ops[1], U30Op::I64F64 { .. }));
+        assert!(matches!(decoded.functions[0].blocks[0].ops[2], U30Op::F64I64 { .. }));
+    }
+
+    // Test roundtrip for IndirectCall (different signature from existing test)
+    #[test]
+    fn test_ser_encode_decode_indirect_call_v2() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U32(1) },
+                            U30Op::IndirectCall { function: 0, args: vec![], results: vec![1] },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![1] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![U30Type::U64],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![0] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert!(matches!(
+            decoded.functions[0].blocks[0].ops[1],
+            U30Op::IndirectCall { .. }
+        ));
+    }
+
+    // Test decode with bad magic (custom crafted)
+    #[test]
+    fn test_ser_decode_bad_magic_custom() {
+        let mut data = vec![0x00, 0x00, 0x00, 0x00]; // wrong magic
+        data.push(1); // version
+        let result = decode(&data);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("bad magic") || err.to_string().contains("U30X"));
+    }
+
+    // Test decode with wrong version
+    #[test]
+    fn test_ser_decode_wrong_version() {
+        let mut data = vec![0x55, 0x33, 0x30, 0x58]; // "U30X"
+        data.push(99); // wrong version
+        let result = decode(&data);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("version") || err.to_string().contains("unsupported"));
+    }
+
+    // Test decode with truncated region data - truncate mid-region initial bytes
+    #[test]
+    fn test_ser_decode_truncated_region_data() {
+        // First encode a valid module with region data
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0,
+                size: 16,
+                readable: true,
+                writable: true,
+                initial: vec![0xAA; 16],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let data = encode(&module);
+        // Truncate the last 5 bytes (middle of region initial data)
+        let truncated = data[..data.len() - 5].to_vec();
+        let result = decode(&truncated);
+        assert!(result.is_err(), "Truncated data should fail to decode");
+    }
+
+    // Test encode/decode with params and results types
+    #[test]
+    fn test_ser_encode_decode_function_signature() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U64, U30Type::Bool, U30Type::F32],
+                results: vec![U30Type::U64, U30Type::F64],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![0] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].params.len(), 3);
+        assert_eq!(decoded.functions[0].results.len(), 2);
+    }
+
+    // Test encode/decode with large region initial data
+    #[test]
+    fn test_ser_encode_decode_large_region() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0,
+                size: 1024,
+                readable: true,
+                writable: false,
+                initial: vec![0xAB; 256],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.regions[0].initial.len(), 256);
+        assert!(decoded.regions[0].initial.iter().all(|&b| b == 0xAB));
+    }
+
+    // Test encode/decode with table with many targets
+    #[test]
+    fn test_ser_encode_decode_table_many_targets() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![U30TableDecl { id: 0, targets: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9] }],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::TableBr { table: 0, index: 3 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.tables[0].targets.len(), 10);
     }
 }

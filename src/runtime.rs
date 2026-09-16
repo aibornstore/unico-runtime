@@ -4556,4 +4556,183 @@ mod tests {
         assert_eq!(out.results, vec![U30Value::U32(200)]);
     }
 
+    // Test AbsU32
+    #[test]
+    fn u30x_abs_u32_works() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(42) },
+                        U30Op::AbsU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("abs u32");
+        assert_eq!(out.results, vec![U30Value::U32(42)]);
+    }
+
+    // Test NegU64
+    #[test]
+    fn u30x_neg_u64_works() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(5) },
+                        U30Op::NegU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("neg u64");
+        assert_eq!(out.results, vec![U30Value::U64(u64::MAX - 4)]); // wrapping negation: !5 + 1 = u64::MAX - 4
+    }
+
+    // Test RotlU32 and RotlU64
+    #[test]
+    fn u30x_rotl_works() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32, U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0b0001_0010_0100_1000) }, // 0x1248
+                        U30Op::Const { dst: 1, value: U30Value::U32(4) },
+                        U30Op::RotlU32 { dst: 2, val: 0, sh: 1 },
+                        U30Op::Const { dst: 3, value: U30Value::U64(1) },
+                        U30Op::Const { dst: 4, value: U30Value::U64(2) },
+                        U30Op::RotlU64 { dst: 5, val: 3, sh: 4 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2, 5] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("rotl");
+        // RotlU32: 0x1248 rotate left by 4 = 0x12480 = 74880
+        assert_eq!(out.results[0].as_u32().unwrap(), 0x1248_u32.rotate_left(4));
+        // RotlU64: 1 rotate left by 2 = 4
+        assert_eq!(out.results[1].as_u64().unwrap(), 1u64.rotate_left(2));
+    }
+
+    // Test F64Min and F64Max
+    #[test]
+    fn u30x_f64_min_max_works() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F64, U30Type::F64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(3.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(1.5) },
+                        U30Op::F64Min { dst: 2, a: 0, b: 1 },
+                        U30Op::F64Max { dst: 3, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2, 3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("f64 min/max");
+        assert!((out.results[0].as_f64().unwrap() - 1.5).abs() < 1e-10);
+        assert!((out.results[1].as_f64().unwrap() - 3.0).abs() < 1e-10);
+    }
+
+    // Test IndirectCall
+    #[test]
+    fn u30x_indirect_call_works() {
+        // Function 0: returns 99
+        // Function 1: main - uses indirect call to call function 0
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![U30Type::U64],
+                    blocks: vec![U30Block {
+                        ops: vec![U30Op::Const { dst: 0, value: U30Value::U64(99) }],
+                        terminator: U30Terminator::Ret { values: vec![0] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![U30Type::U64],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(0) }, // function index
+                            U30Op::IndirectCall { function: 0, args: vec![], results: vec![1] },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![1] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 1,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("indirect call");
+        assert_eq!(out.results, vec![U30Value::U64(99)]);
+    }
+
+    // Test TruncF32U64 (fractional truncation)
+    #[test]
+    fn u30x_trunc_f32_u64_fractional() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(42.9) },
+                        U30Op::TruncF32U64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect("trunc f32 u64");
+        assert_eq!(out.results, vec![U30Value::U64(42)]);
+    }
+
 }

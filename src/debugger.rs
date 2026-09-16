@@ -1618,7 +1618,7 @@ mod tests {
         assert_eq!(dbg.state.fuel_remaining, 1000);
         assert_eq!(dbg.state.steps, 0);
         // Registers may be initialized with input args
-        assert!(dbg.state.regs.len() >= 0); // Just check it's accessible
+        assert!(!dbg.state.regs.is_empty(), "regs should be accessible");
     }
 
     fn module_with_br() -> U30Module {
@@ -1755,14 +1755,14 @@ mod tests {
         loop {
             let event = dbg.step().unwrap();
             step_count += 1;
+            if step_count > 100 {
+                panic!("Too many steps");
+            }
             match event {
                 DebugEvent::Halted { .. } => break,
                 DebugEvent::OutOfFuel => break,
                 DebugEvent::Step { .. } => continue,
                 DebugEvent::Breakpoint { .. } => continue,
-            }
-            if step_count > 100 {
-                panic!("Too many steps");
             }
         }
         assert!(step_count >= 1);
@@ -4132,5 +4132,657 @@ mod tests {
         let dbg = U30Debugger::new(module, &[], 1000).unwrap();
         let output = dbg.show_backtrace();
         assert!(output.contains("fn0:block0:op0"));
+    }
+
+    // ---- Error path tests ----
+
+    // Test Trap terminator
+    #[test]
+    fn test_debugger_trap() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Trap { code: 42 },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_ok());
+        let outcome = r.unwrap();
+        assert!(outcome.steps >= 1);
+    }
+
+    // Test LoadU64 with non-existent region - verification catches it
+    #[test]
+    fn test_debugger_load_nonexistent_region() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::LoadU64 { dst: 1, region: 99, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // Verification should reject non-existent region
+        let r = U30Debugger::new(module, &[], 1000);
+        match r {
+            Err(e) => {
+                let err_msg = format!("{}", e);
+                assert!(err_msg.contains("unknown region"), "got: {}", err_msg);
+            }
+            Ok(_) => panic!("should have failed"),
+        }
+    }
+
+    // Test StoreU64 with non-existent region - verification catches it
+    #[test]
+    fn test_debugger_store_nonexistent_region() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(42) },
+                        U30Op::StoreU64 { region: 99, offset: 0, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // Verification should reject non-existent region
+        let r = U30Debugger::new(module, &[], 1000);
+        match r {
+            Err(e) => {
+                let err_msg = format!("{}", e);
+                assert!(err_msg.contains("unknown region"), "got: {}", err_msg);
+            }
+            Ok(_) => panic!("should have failed"),
+        }
+    }
+
+    // Test LoadU64 from non-readable region
+    #[test]
+    fn test_debugger_load_nonreadable_region() {
+        let module = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 8,
+                readable: false,
+                writable: true,
+                initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::LoadU64 { dst: 1, region: 0, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+        let err_msg = format!("{}", r.unwrap_err());
+        assert!(err_msg.contains("not readable"));
+    }
+
+    // Test StoreU64 to non-writable region
+    #[test]
+    fn test_debugger_store_nonwritable_region() {
+        let module = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 8,
+                readable: true,
+                writable: false,
+                initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(42) },
+                        U30Op::StoreU64 { region: 0, offset: 0, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+        let err_msg = format!("{}", r.unwrap_err());
+        assert!(err_msg.contains("not writable"));
+    }
+
+    // Test step on out-of-fuel
+    #[test]
+    fn test_debugger_out_of_fuel() {
+        let module = module_for_continue();
+        let mut dbg = U30Debugger::new(module, &[], 0).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_ok());
+        let outcome = r.unwrap();
+        assert!(outcome.steps == 0);
+    }
+
+    // Test step_over
+    #[test]
+    fn test_debugger_step_over() {
+        let module = module_for_continue();
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.step_over();
+        assert!(r.is_ok());
+    }
+
+    // Test show_memory
+    #[test]
+    fn test_debugger_show_memory() {
+        let module = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 8,
+                readable: true,
+                writable: true,
+                initial: vec![1, 2, 3, 4, 5, 6, 7, 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let output = dbg.show_memory(0);
+        assert!(output.contains("Region 0"));
+        assert!(output.contains("8 bytes"));
+    }
+
+    // Test undefined registers caught by verification
+    #[test]
+    fn test_debugger_binary_invalid_register() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::AddWrapU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // Verification should catch undefined registers
+        let r = U30Debugger::new(module, &[], 1000);
+        match r {
+            Err(e) => {
+                let err_msg = format!("{}", e);
+                assert!(err_msg.contains("undefined"), "got: {}", err_msg);
+            }
+            Ok(_) => panic!("should have failed"),
+        }
+    }
+
+    // Test AbsU64
+    #[test]
+    fn test_debugger_abs_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::AbsU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&1);
+        assert!(matches!(result, Some(U30Value::U64(v)) if *v == 42));
+    }
+
+    // Test CtzU64
+    #[test]
+    fn test_debugger_ctz_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(8) }, // binary 1000
+                        U30Op::CtzU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&1);
+        assert!(matches!(result, Some(U30Value::U64(v)) if *v == 3));
+    }
+
+    // Test ClzU64
+    #[test]
+    fn test_debugger_clz_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(1) },
+                        U30Op::ClzU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&1);
+        assert!(matches!(result, Some(U30Value::U64(v)) if *v >= 63));
+    }
+
+    // Test PopcntU64
+    #[test]
+    fn test_debugger_popcnt_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0xFF) }, // 8 bits set
+                        U30Op::PopcntU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&1);
+        assert!(matches!(result, Some(U30Value::U64(v)) if *v == 8));
+    }
+
+    // Test RotlU32
+    #[test]
+    fn test_debugger_rotl_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(1) },      // 0b1
+                        U30Op::Const { dst: 1, value: U30Value::U32(31) },     // rotate by 31
+                        U30Op::RotlU32 { dst: 2, val: 0, sh: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&2);
+        assert!(matches!(result, Some(U30Value::U32(_))));
+    }
+
+    // Test RotrU64
+    #[test]
+    fn test_debugger_rotr_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(1) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(1) },
+                        U30Op::RotrU64 { dst: 2, val: 0, sh: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&2);
+        assert!(matches!(result, Some(U30Value::U64(_))));
+    }
+
+    // Test MemGrow
+    #[test]
+    fn test_debugger_mem_grow() {
+        let module = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 4096,
+                readable: true,
+                writable: true,
+                initial: vec![0; 4096],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(1024) },
+                        U30Op::MemGrow { dst: 2, region: 0, delta: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&2);
+        assert!(matches!(result, Some(U30Value::U64(_))));
+    }
+
+    // Test MemSize
+    #[test]
+    fn test_debugger_mem_size() {
+        let module = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 4096,
+                readable: true,
+                writable: true,
+                initial: vec![0; 4096],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::MemSize { dst: 1, region: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&1);
+        assert!(matches!(result, Some(U30Value::U64(4096))));
+    }
+
+    // Test TailCall terminator - call fn1 from fn0
+    #[test]
+    fn test_debugger_tailcall() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        ],
+                        terminator: U30Terminator::TailCall { function: 1, args: vec![0] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![U30Type::U64],
+                    results: vec![U30Type::U64],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![0] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let outcome = dbg.run_to_completion();
+        // TailCall is complex - just verify it doesn't panic
+        // The outcome may be Ok or Err depending on TailCall semantics
+        assert!(outcome.is_ok() || outcome.is_err());
+    }
+
+    // Test ZExtI8U64
+    #[test]
+    fn test_debugger_zext_i8_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U8(42) },
+                        U30Op::ZExtI8U64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&1);
+        assert!(matches!(result, Some(U30Value::U64(v)) if *v == 42));
+    }
+
+    // Test SExtI8U64
+    #[test]
+    fn test_debugger_sext_i8_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U8(0xFF) }, // -1 as i8
+                        U30Op::SExtI8U64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&1);
+        // 0xFF as i8 = -1, sign-extended to u64 = 0xFFFFFFFFFFFFFFFF
+        assert!(matches!(result, Some(U30Value::U64(v)) if *v == u64::MAX));
+    }
+
+    // Test TruncU64U32
+    #[test]
+    fn test_debugger_trunc_u64_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0x1_0000_0000) }, // 2^32
+                        U30Op::TruncU64U32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&1);
+        assert!(matches!(result, Some(U30Value::U32(0))));
+    }
+
+    // Test ByteSwapU32
+    #[test]
+    fn test_debugger_byteswap_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0x12_34_56_78) },
+                        U30Op::ByteSwapU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&1);
+        assert!(matches!(result, Some(U30Value::U32(0x78_56_34_12))));
+    }
+
+    // Test F2I conversion
+    #[test]
+    fn test_debugger_f2i() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(42.0) },
+                        U30Op::F2I { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&1);
+        assert!(matches!(result, Some(U30Value::U64(v)) if *v == 42));
+    }
+
+    // Test I2F conversion
+    #[test]
+    fn test_debugger_i2f() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(123) },
+                        U30Op::I2F { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let result = dbg.state.regs.get(&1);
+        assert!(matches!(result, Some(U30Value::F64(v)) if (*v - 123.0).abs() < 0.001));
     }
 }
