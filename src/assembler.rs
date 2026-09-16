@@ -498,4 +498,417 @@ mod tests {
         assert_eq!(module.functions.len(), decoded.functions.len());
         assert_eq!(module.entry_function, decoded.entry_function);
     }
+
+    // ---- parse_type error cases ----
+    #[test]
+    fn test_parse_type_invalid() {
+        let r = parse_type("invalid");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid type"));
+    }
+
+    // ---- parse_register error cases ----
+    #[test]
+    fn test_parse_register_no_r_prefix() {
+        let r = parse_register("x0");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Unknown register"));
+    }
+
+    #[test]
+    fn test_parse_register_invalid_number() {
+        let r = parse_register("rabc");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Unknown register"));
+    }
+
+    // ---- parse_binary_op error cases ----
+    #[test]
+    fn test_parse_binary_op_invalid() {
+        let r = parse_binary_op("unknown_op");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid binary operation"));
+    }
+
+    // ---- parse_constant error cases ----
+    #[test]
+    fn test_parse_constant_invalid_bool() {
+        let r = parse_constant("maybe", &U30Type::Bool);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_parse_constant_invalid_u8() {
+        let r = parse_constant("256", &U30Type::U8);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid u8 constant"));
+    }
+
+    #[test]
+    fn test_parse_constant_invalid_u16() {
+        let r = parse_constant("999999", &U30Type::U16);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_parse_constant_invalid_u32() {
+        let r = parse_constant("not_a_number", &U30Type::U32);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_parse_constant_invalid_f32() {
+        let r = parse_constant("not_a_float", &U30Type::F32);
+        assert!(r.is_err());
+    }
+
+    // ---- tokenize_line ----
+    #[test]
+    fn test_tokenize_line_comment_only() {
+        let r = tokenize_line("; this is a comment");
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn test_tokenize_line_empty() {
+        let r = tokenize_line("");
+        assert!(r.is_empty());
+    }
+
+    #[test]
+    fn test_tokenize_line_with_comment() {
+        let r = tokenize_line("const r0 u32 42 ; this is inline comment");
+        assert_eq!(r.len(), 4);
+        assert_eq!(r[0], "const");
+        assert_eq!(r[1], "r0");
+        assert_eq!(r[2], "u32");
+        assert_eq!(r[3], "42");
+    }
+
+    #[test]
+    fn test_tokenize_line_whitespace_only() {
+        let r = tokenize_line("   \t  ");
+        assert!(r.is_empty());
+    }
+
+    // ---- Assembler error cases ----
+    #[test]
+    fn test_assemble_region_wrong_arg_count() {
+        let r = assemble("region 0 65536 1");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("region requires 4 args"));
+    }
+
+    #[test]
+    fn test_assemble_region_invalid_id() {
+        let r = assemble("region abc 65536 1 1");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid region id"));
+    }
+
+    #[test]
+    fn test_assemble_region_invalid_readable() {
+        let r = assemble("region 0 65536 not_a_flag 1");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid readable flag"));
+    }
+
+    #[test]
+    fn test_assemble_function_wrong_arg_count() {
+        let r = assemble("region 0 65536 1 1\nfunction 1 0");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("function requires 3 args"));
+    }
+
+    #[test]
+    fn test_assemble_function_invalid_param_count() {
+        let r = assemble("region 0 65536 1 1\nfunction abc 0 0");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid param count"));
+    }
+
+    #[test]
+    fn test_assemble_block_wrong_arg_count() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0 1");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("block requires 1 arg"));
+    }
+
+    #[test]
+    fn test_assemble_block_invalid_id() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock abc");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid block id"));
+    }
+
+    #[test]
+    fn test_assemble_const_wrong_arg_count() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nconst r0 u32");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("const requires 3 args"));
+    }
+
+    #[test]
+    fn test_assemble_const_invalid_type() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nconst r0 nonexistent 42");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid type"));
+    }
+
+    #[test]
+    fn test_assemble_binary_wrong_arg_count() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nbinary r0 add_u32 r1");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("binary requires 4 args"));
+    }
+
+    #[test]
+    fn test_assemble_binary_invalid_op() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nbinary r0 bad_op r1 r2");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid binary operation"));
+    }
+
+    #[test]
+    fn test_assemble_binary_invalid_dst_register() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nbinary x0 add_u32 r1 r2");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Unknown register"));
+    }
+
+    #[test]
+    fn test_assemble_ret_wrong_arg_count() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nret");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("ret requires 1 arg"));
+    }
+
+    #[test]
+    fn test_assemble_ret_invalid_register() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nret xyz");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Unknown register"));
+    }
+
+    #[test]
+    fn test_assemble_entry_wrong_arg_count() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nret r0\nend\nentry");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("entry requires 1 arg"));
+    }
+
+    #[test]
+    fn test_assemble_entry_invalid_index() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nret r0\nend\nentry abc");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid function index"));
+    }
+
+    #[test]
+    fn test_assemble_unknown_directive() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nret r0\nend\nunknown_directive 123");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Unknown directive"));
+    }
+
+    #[test]
+    fn test_assemble_end_invalid_directive() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nret r0\nend invalid");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid end directive"));
+    }
+
+    #[test]
+    fn test_assemble_block_missing_terminator() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 0\nblock 0\nconst r0 u32 42\nend");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("missing terminator"));
+    }
+
+    // ---- Happy path extensions ----
+    #[test]
+    fn test_assemble_multiple_functions() {
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+              block 0
+                const r0 u32 1
+                ret r0
+              end
+            end
+            function 0 1 0
+              block 0
+                const r0 u32 2
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        assert_eq!(module.functions.len(), 2);
+        assert_eq!(module.entry_function, 0);
+    }
+
+    #[test]
+    fn test_assemble_multiple_blocks() {
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+              block 0
+                const r0 u32 1
+                ret r0
+              end
+              block 1
+                const r0 u32 2
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        assert_eq!(module.functions[0].blocks.len(), 2);
+    }
+
+    #[test]
+    fn test_assemble_with_table() {
+        let asm = r#"
+            region 0 65536 1 1
+            table 0 1 2 3
+            function 0 1 0
+              block 0
+                const r0 u32 1
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        assert_eq!(module.tables.len(), 1);
+        assert_eq!(module.tables[0].id, 0);
+        assert_eq!(module.tables[0].targets, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_assemble_table_invalid_id() {
+        let r = assemble("region 0 65536 1 1\ntable abc 1 2 3");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid table id"));
+    }
+
+    #[test]
+    fn test_assemble_table_invalid_target() {
+        let r = assemble("region 0 65536 1 1\ntable 0 1 abc 3");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid table target"));
+    }
+
+    #[test]
+    fn test_assemble_table_min_args() {
+        let asm = r#"
+            region 0 65536 1 1
+            table 0 1
+            function 0 1 0
+              block 0
+                const r0 u32 0
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        assert_eq!(module.tables.len(), 1);
+        assert_eq!(module.tables[0].targets, vec![1]);
+    }
+
+    #[test]
+    fn test_assemble_all_binary_ops() {
+        let ops = [
+            ("add_u32", U30BinaryOp::AddWrapU32),
+            ("add_u64", U30BinaryOp::AddWrapU64),
+            ("sub_u32", U30BinaryOp::SubWrapU32),
+            ("sub_u64", U30BinaryOp::SubWrapU64),
+            ("mul_u32", U30BinaryOp::MulWrapU32),
+            ("mul_u64", U30BinaryOp::MulWrapU64),
+            ("div_u32", U30BinaryOp::DivU32),
+            ("div_u64", U30BinaryOp::DivU64),
+            ("rem_u32", U30BinaryOp::RemU32),
+            ("rem_u64", U30BinaryOp::RemU64),
+            ("and_u8", U30BinaryOp::AndU8),
+            ("or_u8", U30BinaryOp::OrU8),
+            ("xor_u8", U30BinaryOp::XorU8),
+            ("shl_u32", U30BinaryOp::ShlU32),
+            ("shl_u64", U30BinaryOp::ShlU64),
+            ("shr_u32", U30BinaryOp::ShrU32),
+            ("shr_u64", U30BinaryOp::ShrU64),
+            ("eq", U30BinaryOp::Eq),
+            ("lt_u32", U30BinaryOp::LtU64),
+            ("lt_u64", U30BinaryOp::LtU64),
+            ("gt_u32", U30BinaryOp::GtU64),
+            ("gt_u64", U30BinaryOp::GtU64),
+            ("ge_u32", U30BinaryOp::GeU64),
+            ("ge_u64", U30BinaryOp::GeU64),
+            ("le_u32", U30BinaryOp::LeU64),
+            ("le_u64", U30BinaryOp::LeU64),
+            ("min_u32", U30BinaryOp::MinU32),
+            ("min_u64", U30BinaryOp::MinU64),
+            ("max_u32", U30BinaryOp::MaxU32),
+            ("max_u64", U30BinaryOp::MaxU64),
+        ];
+        for (name, expected_op) in ops {
+            let asm = format!(r#"
+                region 0 65536 1 1
+                function 0 1 0
+                  block 0
+                    const r0 u32 1
+                    const r1 u32 2
+                    binary r2 {} r0 r1
+                    ret r2
+                  end
+                end
+                entry 0
+            "#, name);
+            let module = assemble(&asm).expect(&format!("Failed for op: {}", name));
+            if let U30Op::Binary { op, .. } = &module.functions[0].blocks[0].ops[2] {
+                assert_eq!(*op, expected_op, "Mismatch for op: {}", name);
+            } else {
+                panic!("Expected Binary op for: {}", name);
+            }
+        }
+    }
+
+    #[test]
+    fn test_assemble_all_types() {
+        let types = [
+            ("bool", "true", U30Type::Bool),
+            ("u8", "42", U30Type::U8),
+            ("u16", "1000", U30Type::U16),
+            ("u32", "123456", U30Type::U32),
+            ("u64", "9999999999", U30Type::U64),
+            ("f32", "3.14", U30Type::F32),
+            ("f64", "2.71828", U30Type::F64),
+        ];
+        for (name, value, _expected_ty) in types {
+            let asm = format!(r#"
+                region 0 65536 1 1
+                function 0 1 0
+                  block 0
+                    const r0 {} {}
+                    ret r0
+                  end
+                end
+                entry 0
+            "#, name, value);
+            let r = assemble(&asm);
+            if r.is_err() {
+                panic!("Failed for type {}: {}", name, r.unwrap_err());
+            }
+        }
+    }
+
+    #[test]
+    fn test_assemble_empty_lines_ignored() {
+        let asm = "\n\n   \n; comment\n\nregion 0 65536 1 1\n\nfunction 0 1 0\n\nblock 0\n\nconst r0 u32 0\n\nret r0\n\nend\n\nentry 0\n";
+        let module = assemble(asm).expect("Failed to assemble with empty lines");
+        assert_eq!(module.regions.len(), 1);
+    }
 }
