@@ -118,3 +118,93 @@ impl From<Error> for u8 {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_code_exit_code_explicit_trap() {
+        assert_eq!(ErrorCode::E0T001Explicit.exit_code(), 6);
+        assert_eq!(ErrorCode::E1T001Explicit.exit_code(), 6);
+        assert_eq!(ErrorCode::E2T001Explicit.exit_code(), 6);
+    }
+
+    #[test]
+    fn test_error_code_exit_code_structural() {
+        assert_eq!(ErrorCode::E0T002Structural.exit_code(), 4);
+        assert_eq!(ErrorCode::E0T003Canonical.exit_code(), 4);
+        assert_eq!(ErrorCode::E1T003CFG.exit_code(), 4);
+        assert_eq!(ErrorCode::E1T004Type.exit_code(), 4);
+    }
+
+    #[test]
+    fn test_error_code_exit_code_runtime() {
+        assert_eq!(ErrorCode::E1T002Fuel.exit_code(), 6);
+        assert_eq!(ErrorCode::E2T002Fuel.exit_code(), 6);
+        assert_eq!(ErrorCode::E2T003MemoryOOB.exit_code(), 6);
+        assert_eq!(ErrorCode::E2T004MemoryAlign.exit_code(), 6);
+        assert_eq!(ErrorCode::E2T005CallDepth.exit_code(), 6);
+    }
+
+    #[test]
+    fn test_error_code_exit_code_host() {
+        assert_eq!(ErrorCode::H0001CapabilityDenied.exit_code(), 7);
+        assert_eq!(ErrorCode::H0002BudgetExceeded.exit_code(), 7);
+        assert_eq!(ErrorCode::H0003InvalidRequest.exit_code(), 7);
+    }
+
+    #[test]
+    fn test_error_code_family() {
+        assert_eq!(ErrorCode::E0T001Explicit.family(), "E0");
+        assert_eq!(ErrorCode::E1T002Fuel.family(), "E1");
+        assert_eq!(ErrorCode::E2T003MemoryOOB.family(), "E2");
+        assert_eq!(ErrorCode::H0001CapabilityDenied.family(), "HOST");
+    }
+
+    #[test]
+    fn test_error_from_conversion() {
+        let err = Error::Trap(ErrorCode::E1T001Explicit);
+        let code: u8 = err.into();
+        assert_eq!(code, 6);
+
+        let err = Error::Format("bad format".into());
+        let code: u8 = err.into();
+        assert_eq!(code, 4);
+
+        let err = Error::Generic("generic error".into());
+        let code: u8 = err.into();
+        assert_eq!(code, 4);
+
+        let err = Error::Unimplemented("not implemented".into());
+        let code: u8 = err.into();
+        assert_eq!(code, 4);
+    }
+
+    #[test]
+    fn test_error_display() {
+        let err = Error::Format("test".into());
+        assert!(err.to_string().contains("test"));
+
+        let err = Error::Canonical("canon".into());
+        assert!(err.to_string().contains("canon"));
+
+        let err = Error::Verification("verify".into());
+        assert!(err.to_string().contains("verify"));
+
+        let err = Error::Trap(ErrorCode::E0T001Explicit);
+        assert!(err.to_string().contains("Runtime trap"));
+
+        let err = Error::HostDenied("capability".into());
+        assert!(err.to_string().contains("capability"));
+
+        let err = Error::HostBudgetExceeded("budget".into());
+        assert!(err.to_string().contains("budget"));
+
+        let err = Error::Generic("generic".into());
+        assert!(err.to_string().contains("generic"));
+
+        let err = Error::Unimplemented("unimp".into());
+        assert!(err.to_string().contains("unimp"));
+    }
+}

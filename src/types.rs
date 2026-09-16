@@ -141,3 +141,79 @@ impl RegisterValue {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_profile_magic_bytes() {
+        // Test that magic() returns correct prefix and last byte
+        let magic = Profile::E0.magic();
+        assert_eq!(magic[0], 85);  // 'U'
+        assert_eq!(magic[1], 78);  // 'N'
+        assert_eq!(magic[2], 73);  // 'I'
+        assert_eq!(magic[3], 67);  // 'C'
+        assert_eq!(magic[4], 79);  // 'O'
+        assert_eq!(magic[5], 224); // \xe0
+    }
+
+    #[test]
+    fn test_profile_all_variants() {
+        // Test all profile variants can be created and have magic
+        let profiles = [Profile::E0, Profile::E1, Profile::E2, Profile::E3Pending];
+        for p in profiles {
+            let magic = p.magic();
+            assert_eq!(magic.len(), 6);
+        }
+    }
+
+    #[test]
+    fn test_execution_result_pass() {
+        let provenance = Provenance::default();
+        let result = ExecutionResult::pass(42, provenance.clone());
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(42));
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn test_execution_result_fail() {
+        let provenance = Provenance::default();
+        let result = ExecutionResult::fail("test error".into(), provenance);
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.is_some());
+        assert!(result.error.unwrap().contains("test error"));
+    }
+
+    #[test]
+    fn test_execution_result_pass_with_memory() {
+        let provenance = Provenance::default();
+        let mem = vec![1, 2, 3];
+        let result = ExecutionResult::pass_with_memory(42, mem.clone(), provenance);
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.memory, Some(mem));
+    }
+
+    #[test]
+    fn test_register_value_as_i64() {
+        let rv = RegisterValue::I64(42);
+        assert_eq!(rv.as_i64(), Some(42));
+        assert_eq!(rv.as_bool(), None);
+
+        let rv = RegisterValue::Bool(true);
+        assert_eq!(rv.as_i64(), None);
+    }
+
+    #[test]
+    fn test_register_value_as_bool() {
+        let rv = RegisterValue::Bool(true);
+        assert_eq!(rv.as_bool(), Some(true));
+
+        let rv = RegisterValue::Bool(false);
+        assert_eq!(rv.as_bool(), Some(false));
+
+        let rv = RegisterValue::I64(0);
+        assert_eq!(rv.as_bool(), None);
+    }
+}

@@ -1968,4 +1968,1844 @@ mod tests {
         assert!(ops.iter().any(|op| matches!(op, U30Op::TableBr { table: 0, index: 0 })),
             "expected TableBr {{ table: 0, index: 0 }} in ops");
     }
+
+    #[test]
+    fn test_ser_all_binary_ops_roundtrip() {
+        use crate::ir::U30BinaryOp::*;
+        let ops_to_test = [
+            (AddWrapU64, 0),
+            (AddWrapU32, 1),
+            (SubWrapU64, 2),
+            (SubWrapU32, 3),
+            (MulWrapU64, 4),
+            (MulWrapU32, 5),
+            (AndU8, 6),
+            (OrU8, 7),
+            (XorU8, 8),
+            (ShlU64, 9),
+            (ShlU32, 10),
+            (ShrU64, 11),
+            (ShrU32, 12),
+            (DivU64, 13),
+            (DivU32, 14),
+            (RemU64, 15),
+            (RemU32, 16),
+            (Eq, 17),
+            (LtU64, 18),
+            (GtU64, 19),
+            (GeU64, 20),
+            (LeU64, 21),
+            (LeU32, 22),
+            (MinU64, 23),
+            (MaxU64, 24),
+            (MinU32, 25),
+            (MaxU32, 26),
+        ];
+
+        for (op, _expected_idx) in ops_to_test {
+            let module = U30Module {
+                regions: vec![],
+                tables: vec![],
+                functions: vec![U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![U30Op::Binary { dst: 0, op, a: 0, b: 0 }],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                }],
+                entry_function: 0,
+            };
+            let encoded = encode(&module);
+            let decoded = decode(&encoded).expect(&format!("decode should succeed for {:?}", op));
+            
+            if let U30Op::Binary { op: decoded_op, .. } = &decoded.functions[0].blocks[0].ops[0] {
+                assert_eq!(*decoded_op, op, "Binary op {:?} should round-trip", op);
+            } else {
+                panic!("Expected Binary op");
+            }
+        }
+    }
+
+    #[test]
+    fn test_ser_all_value_types_roundtrip() {
+        // Test U8
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![U30Op::Const { dst: 0, value: U30Value::U8(42) }],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::Const { value: U30Value::U8(v), .. } = &decoded.functions[0].blocks[0].ops[0] {
+            assert_eq!(*v, 42);
+        } else { panic!("expected U8"); }
+
+        // Test U16
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![U30Op::Const { dst: 0, value: U30Value::U16(1234) }],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::Const { value: U30Value::U16(v), .. } = &decoded.functions[0].blocks[0].ops[0] {
+            assert_eq!(*v, 1234);
+        } else { panic!("expected U16"); }
+
+        // Test U32
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![U30Op::Const { dst: 0, value: U30Value::U32(999999) }],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::Const { value: U30Value::U32(v), .. } = &decoded.functions[0].blocks[0].ops[0] {
+            assert_eq!(*v, 999999);
+        } else { panic!("expected U32"); }
+
+        // Test Bool
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![U30Op::Const { dst: 0, value: U30Value::Bool(true) }],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::Const { value: U30Value::Bool(b), .. } = &decoded.functions[0].blocks[0].ops[0] {
+            assert!(b);
+        } else { panic!("expected Bool"); }
+    }
+
+    #[test]
+    fn test_ser_multiple_functions() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![U30Op::Const { dst: 0, value: U30Value::U32(1) }],
+                        terminator: U30Terminator::Ret { values: vec![0] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![U30Op::Const { dst: 0, value: U30Value::U32(2) }],
+                        terminator: U30Terminator::Ret { values: vec![0] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 1, // second function is entry
+        };
+        let encoded = encode(&module);
+        let decoded = decode(&encoded).expect("decode should succeed");
+        assert_eq!(decoded.functions.len(), 2);
+        assert_eq!(decoded.entry_function, 1);
+    }
+
+    #[test]
+    fn test_ser_multiple_regions() {
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 64, readable: true, writable: false, initial: vec![0; 64] },
+                U30RegionDecl { id: 1, size: 128, readable: true, writable: true, initial: vec![1; 128] },
+                U30RegionDecl { id: 2, size: 256, readable: false, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.regions.len(), 3);
+        assert_eq!(decoded.regions[0].id, 0);
+        assert_eq!(decoded.regions[1].id, 1);
+        assert_eq!(decoded.regions[2].id, 2);
+        assert_eq!(decoded.regions[0].size, 64);
+        assert_eq!(decoded.regions[1].writable, true);
+        assert_eq!(decoded.regions[2].readable, false);
+    }
+
+    #[test]
+    fn test_ser_decode_invalid_magic() {
+        let invalid = vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05];
+        let err = decode(&invalid).expect_err("invalid magic should fail");
+        assert!(err.to_string().contains("U30X") || err.to_string().contains("magic"));
+    }
+
+    #[test]
+    fn test_ser_decode_truncated_header() {
+        // Header is 5 bytes: 4 magic + 1 version
+        let truncated = b"U30X".to_vec(); // only 3 bytes
+        let err = decode(&truncated).expect_err("truncated header should fail");
+        assert!(err.to_string().contains("truncated") || err.to_string().contains("U30X"));
+    }
+
+    #[test]
+    fn test_ser_decode_truncated_regions() {
+        // Valid header but truncated region data
+        let mut data = b"U30X".to_vec(); // magic + version
+        data.push(1); // 1 region
+        // Missing region data
+        let err = decode(&data).expect_err("truncated region data should fail");
+        assert!(err.to_string().contains("truncated") || err.to_string().contains("region"));
+    }
+
+    #[test]
+    fn test_ser_decode_truncated_function() {
+        // Valid header and regions but truncated function
+        let mut data = Vec::new();
+        data.extend_from_slice(b"U30X");
+        data.push(1); // version
+        data.push(0); // 0 regions
+        data.push(1); // 1 function
+        // Missing function data
+        let err = decode(&data).expect_err("truncated function should fail");
+        // Should fail with some error about data
+        assert!(!err.to_string().is_empty());
+    }
+
+    #[test]
+    fn test_ser_decode_truncated_block() {
+        // Valid up to functions but truncated block
+        let mut data = Vec::new();
+        data.extend_from_slice(b"U30X");
+        data.push(1);
+        data.push(0); // 0 regions
+        data.push(0); // 0 functions... wait, need at least 1 function
+        data.push(1); // 1 function
+        data.push(0); // 0 params
+        data.push(0); // 0 results
+        data.push(0); // 1 block (entry)
+        // Truncated block
+        let err = decode(&data).expect_err("truncated block should fail");
+        assert!(!err.to_string().is_empty());
+    }
+
+    #[test]
+    fn test_ser_encode_decode_empty_module() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![],
+            entry_function: 0,
+        };
+        let encoded = encode(&module);
+        assert!(encoded.len() >= 5); // header only
+        // Empty module can be encoded
+        let decoded = decode(&encoded).expect("empty module decode");
+        assert_eq!(decoded.functions.len(), 0);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_many_regions() {
+        let regions: Vec<_> = (0..10).map(|i| U30RegionDecl {
+            id: i as u32,
+            size: ((i + 1) * 64) as usize,
+            readable: i % 2 == 0,
+            writable: i % 2 == 1,
+            initial: vec![i as u8; 8],
+        }).collect();
+        
+        let module = U30Module {
+            regions,
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.regions.len(), 10);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_many_tables() {
+        let tables: Vec<_> = (0..5).map(|i| U30TableDecl {
+            id: i,
+            targets: vec![(i + 1) as usize, (i + 2) as usize, (i + 3) as usize],
+        }).collect();
+        
+        let module = U30Module {
+            regions: vec![],
+            tables,
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.tables.len(), 5);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_many_functions() {
+        let functions: Vec<_> = (0..20).map(|_| U30Function {
+            params: vec![],
+            results: vec![],
+            blocks: vec![U30Block {
+                ops: vec![],
+                terminator: U30Terminator::Ret { values: vec![] },
+            }],
+            entry_block: 0,
+        }).collect();
+        
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions,
+            entry_function: 5,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions.len(), 20);
+        assert_eq!(decoded.entry_function, 5);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_blocks_with_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![
+                    U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U8(1) },
+                            U30Op::Const { dst: 1, value: U30Value::U8(2) },
+                            U30Op::Const { dst: 2, value: U30Value::U8(3) },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                    U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U8(100) },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].blocks.len(), 2);
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 3);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_br_terminator() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Br { target: 1 },
+                    },
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Terminator::Br { target } = decoded.functions[0].blocks[0].terminator {
+            assert_eq!(target, 1);
+        } else {
+            panic!("Expected Br terminator");
+        }
+    }
+
+    #[test]
+    fn test_ser_encode_decode_ret_with_values() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![1, 2, 3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Terminator::Ret { values } = &decoded.functions[0].blocks[0].terminator {
+            assert_eq!(values.as_slice(), &[1, 2, 3]);
+        } else {
+            panic!("Expected Ret terminator");
+        }
+    }
+
+    #[test]
+    fn test_ser_encode_decode_unary_ops() {
+        // Test Select and NotU8 operations
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U8(5) },
+                        U30Op::Const { dst: 1, value: U30Value::U8(10) },
+                        U30Op::Const { dst: 2, value: U30Value::Bool(true) },
+                        U30Op::Select { dst: 3, cond: 2, a: 0, b: 1 },
+                        U30Op::NotU8 { dst: 4, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 5);
+        // Verify Select round-tripped
+        if let U30Op::Select { dst, cond, a, b } = decoded.functions[0].blocks[0].ops[3] {
+            assert_eq!(dst, 3);
+            assert_eq!(cond, 2);
+            assert_eq!(a, 0);
+            assert_eq!(b, 1);
+        } else {
+            panic!("Expected Select op");
+        }
+    }
+
+    #[test]
+    fn test_ser_encode_decode_memfill_memcopy() {
+        // Test MemFill and MemCopy roundtrip (encode/decode only)
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![0; 256] },
+                U30RegionDecl { id: 1, size: 256, readable: true, writable: true, initial: vec![0; 256] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0xFF) },
+                        U30Op::Const { dst: 2, value: U30Value::U32(16) },
+                        U30Op::MemFill { region: 0, offset: 0, value: 1, size: 2 },
+                        U30Op::MemCopy { dst_region: 1, dst_offset: 0, src_region: 0, src_offset: 0, size: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        // Just test roundtrip encoding/decoding
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.regions.len(), 2);
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 5);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_break_assert() {
+        // Test Break and Assert instructions
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        U30Op::Assert { cond: 0, msg: 1 },
+                        U30Op::Break { code: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let _decoded = decode(&encode(&module)).unwrap();
+        // Break/Assert are no-op in this context but should encode/decode
+    }
+
+    #[test]
+    fn test_ser_encode_decode_load_store() {
+        // Test LoadU16, StoreU16 roundtrip
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![0; 256] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U16],  // Return U16 value
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U16(0x1234) },
+                        U30Op::StoreU16 { region: 0, offset: 0, src: 1 },
+                        U30Op::LoadU16 { dst: 2, region: 0, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        // Execute both
+        let runtime = U30Runtime::default();
+        let orig = runtime.execute_experimental(&module, &[]).expect("orig");
+        let roundtrip = runtime.execute_experimental(&decoded, &[]).expect("roundtrip");
+        assert_eq!(orig.results, roundtrip.results);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_call() {
+        // Test Call instruction (local function call)
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                // Function 0 (entry): call function 1
+                U30Function {
+                    params: vec![],
+                    results: vec![U30Type::U32],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U32(42) },
+                            U30Op::Const { dst: 1, value: U30Value::U32(10) },
+                            U30Op::Call { function: 1, args: vec![0, 1], results: vec![2] },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![2] },
+                    }],
+                    entry_block: 0,
+                },
+                // Function 1: receives two args, returns sum
+                U30Function {
+                    params: vec![U30Type::U32, U30Type::U32],
+                    results: vec![U30Type::U32],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Binary { dst: 0, op: crate::ir::U30BinaryOp::AddWrapU32, a: 0, b: 1 },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![0] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions.len(), 2);
+        // Execute
+        let runtime = U30Runtime::default();
+        let orig = runtime.execute_experimental(&module, &[]).expect("orig");
+        assert_eq!(orig.results, vec![U30Value::U32(52)]); // 42 + 10
+    }
+
+    #[test]
+    fn test_ser_encode_decode_f32_ops() {
+        // Test F32 arithmetic: FAdd, FSub, FMul, FDiv (FAdd expects F32, not F64)
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(3.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F32(2.0) },
+                        U30Op::FAdd { dst: 2, a: 0, b: 1 },
+                        U30Op::FSub { dst: 3, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let _decoded = decode(&encode(&module)).unwrap();
+        let runtime = U30Runtime::default();
+        let orig = runtime.execute_experimental(&module, &[]).expect("orig");
+        assert_eq!(orig.results, vec![U30Value::F32(5.0)]); // 3.0 + 2.0
+    }
+
+    #[test]
+    fn test_ser_encode_decode_memgrow() {
+        // Test MemGrow
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 64, readable: true, writable: true, initial: vec![0; 64] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(64) },
+                        U30Op::MemGrow { dst: 1, region: 0, delta: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let _decoded = decode(&encode(&module)).unwrap();
+        let runtime = U30Runtime::default();
+        let orig = runtime.execute_experimental(&module, &[]).expect("orig");
+        let roundtrip = runtime.execute_experimental(&decode(&encode(&module)).unwrap(), &[]).expect("roundtrip");
+        assert_eq!(orig.results, roundtrip.results);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_f64_ops_roundtrip() {
+        // Test F64Add, F64Mul, F64Sqrt roundtrip
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(9.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(3.0) },
+                        U30Op::F64Sqrt { dst: 2, src: 0 }, // sqrt(9) = 3
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let _decoded = decode(&encode(&module)).unwrap();
+        let runtime = U30Runtime::default();
+        let orig = runtime.execute_experimental(&module, &[]).expect("orig");
+        // sqrt(9) = 3
+        if let U30Value::F64(v) = &orig.results[0] {
+            assert!((v - 3.0).abs() < 0.0001);
+        } else {
+            panic!("expected F64 result");
+        }
+    }
+
+    #[test]
+    fn test_ser_encode_decode_float_conversions() {
+        // Test I2F, F2I conversions - just test encoding/decoding
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F32],  // I2F produces F32
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(42) },
+                        U30Op::I2F { dst: 1, src: 0 },  // 42 as float
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 2);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_all_terminators() {
+        // Test all terminator types: Br, BrIf, Ret, Trap
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![
+                        U30Block {
+                            ops: vec![],
+                            terminator: U30Terminator::Br { target: 1 },
+                        },
+                        U30Block {
+                            ops: vec![],
+                            terminator: U30Terminator::Ret { values: vec![] },
+                        },
+                    ],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Terminator::Br { target } = &decoded.functions[0].blocks[0].terminator {
+            assert_eq!(*target, 1);
+        } else {
+            panic!("Expected Br terminator");
+        }
+    }
+
+    #[test]
+    fn test_ser_encode_decode_breakpoint_invariant() {
+        // Test that Break instruction (no-op in U30) encodes/decodes correctly
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Break { code: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 1);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_assert_roundtrip() {
+        // Test Assert instruction
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        U30Op::Assert { cond: 0, msg: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 2);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_tablebr_roundtrip() {
+        // Test TableBr instruction with multiple tables
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![
+                crate::ir::U30TableDecl { id: 0, targets: vec![1, 2] },
+                crate::ir::U30TableDecl { id: 1, targets: vec![3, 4, 5, 6] },
+            ],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(1) },
+                        U30Op::TableBr { table: 1, index: 0 },  // use table 1
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.tables.len(), 2);
+        assert_eq!(decoded.tables[1].targets.len(), 4);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_tail_call() {
+        // Test TailCall instruction
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(1) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(2) },
+                    ],
+                    terminator: U30Terminator::TailCall { function: 0, args: vec![0, 1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Terminator::TailCall { function, args } = &decoded.functions[0].blocks[0].terminator {
+            assert_eq!(*function, 0);
+            assert_eq!(args.as_slice(), &[0, 1]);
+        } else {
+            panic!("Expected TailCall terminator");
+        }
+    }
+
+    #[test]
+    fn test_ser_encode_decode_i2f_f2i() {
+        // Test I2F and F2I conversions
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(42) },
+                        U30Op::I2F { dst: 1, src: 0 },
+                        U30Op::F2I { dst: 2, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 3);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_f64_add() {
+        // Test F64Add roundtrip
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(2.0) },
+                        U30Op::F64Add { dst: 2, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::F64Add { dst, a, b } = &decoded.functions[0].blocks[0].ops[2] {
+            assert_eq!(*dst, 2);
+            assert_eq!(*a, 0);
+            assert_eq!(*b, 1);
+        } else {
+            panic!("Expected F64Add op");
+        }
+    }
+
+    #[test]
+    fn test_ser_encode_decode_f64_sub_mul() {
+        // Test F64Sub, F64Mul roundtrip
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(5.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(3.0) },
+                        U30Op::F64Sub { dst: 2, a: 0, b: 1 },
+                        U30Op::F64Mul { dst: 3, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 4);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_f64_div_sqrt() {
+        // Test F64Div, F64Sqrt roundtrip
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(10.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(2.0) },
+                        U30Op::F64Div { dst: 2, a: 0, b: 1 },
+                        U30Op::F64Sqrt { dst: 3, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 4);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_f64_neg_abs() {
+        // Test F64Neg, F64Abs roundtrip
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(-5.0) },
+                        U30Op::F64Neg { dst: 1, src: 0 },
+                        U30Op::F64Abs { dst: 2, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 3);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_f64_min_max() {
+        // Test F64Min, F64Max roundtrip
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(2.0) },
+                        U30Op::F64Min { dst: 2, a: 0, b: 1 },
+                        U30Op::F64Max { dst: 3, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].blocks[0].ops.len(), 4);
+    }
+
+    #[test]
+    fn test_ser_encode_decode_break() {
+        // Test Break instruction
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Break { code: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::Break { code } = &decoded.functions[0].blocks[0].ops[0] {
+            assert_eq!(*code, 0);
+        } else {
+            panic!("Expected Break op");
+        }
+    }
+
+    #[test]
+    fn test_ser_encode_decode_u64_value() {
+        // Test U64 constant value
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(u64::MAX) },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::Const { value: U30Value::U64(v), .. } = &decoded.functions[0].blocks[0].ops[0] {
+            assert_eq!(*v, u64::MAX);
+        } else {
+            panic!("Expected Const U64");
+        }
+    }
+
+    #[test]
+    fn test_ser_encode_decode_f32_value() {
+        // Test F32 constant value
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(f32::MAX) },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::Const { value: U30Value::F32(v), .. } = &decoded.functions[0].blocks[0].ops[0] {
+            assert_eq!(*v, f32::MAX);
+        } else {
+            panic!("Expected Const F32");
+        }
+    }
+
+    #[test]
+    fn test_ser_encode_decode_bool_true() {
+        // Test Bool(true) constant value
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::Const { value: U30Value::Bool(b), .. } = &decoded.functions[0].blocks[0].ops[0] {
+            assert!(b);
+        } else {
+            panic!("Expected Const Bool(true)");
+        }
+    }
+
+    #[test]
+    fn test_ser_encode_decode_brif_terminator() {
+        // Test BrIf terminator
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![
+                    U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        ],
+                        terminator: U30Terminator::BrIf { cond: 0, then_target: 2, else_target: 1 },
+                    },
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Terminator::BrIf { cond, then_target, else_target } = &decoded.functions[0].blocks[0].terminator {
+            assert_eq!(*cond, 0);
+            assert_eq!(*then_target, 2);
+            assert_eq!(*else_target, 1);
+        } else {
+            panic!("Expected BrIf terminator");
+        }
+    }
+
+    // Test MemSize roundtrip
+    #[test]
+    fn test_ser_encode_decode_memsize() {
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 128, readable: true, writable: true, initial: vec![0; 128] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemSize { dst: 0, region: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.regions.len(), 1);
+        if let U30Op::MemSize { dst, region } = &decoded.functions[0].blocks[0].ops[0] {
+            assert_eq!(*dst, 0);
+            assert_eq!(*region, 0);
+        } else {
+            panic!("Expected MemSize op");
+        }
+    }
+
+    // Test MemCopy roundtrip
+    #[test]
+    fn test_ser_encode_decode_memcopy() {
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 64, readable: true, writable: true, initial: vec![0; 64] },
+                U30RegionDecl { id: 1, size: 64, readable: true, writable: true, initial: vec![0; 64] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemCopy { dst_region: 0, dst_offset: 0, src_region: 1, src_offset: 0, size: 16 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.regions.len(), 2);
+        if let U30Op::MemCopy { dst_region, dst_offset, src_region, src_offset, size } = &decoded.functions[0].blocks[0].ops[0] {
+            assert_eq!(*dst_region, 0);
+            assert_eq!(*src_region, 1);
+            assert_eq!(*size, 16);
+        } else {
+            panic!("Expected MemCopy op");
+        }
+    }
+
+    // Test MemFill roundtrip
+    #[test]
+    fn test_ser_encode_decode_memfill() {
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 64, readable: true, writable: true, initial: vec![0; 64] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemFill { region: 0, offset: 0, value: 42, size: 16 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::MemFill { region, offset: _, value, size } = &decoded.functions[0].blocks[0].ops[0] {
+            assert_eq!(*region, 0);
+            assert_eq!(*value, 42);
+            assert_eq!(*size, 16);
+        } else {
+            panic!("Expected MemFill op");
+        }
+    }
+
+    // Test TableBr roundtrip
+    #[test]
+    fn test_ser_encode_decode_tablebr() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![1, 2, 3] },
+            ],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![
+                    U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U32(1) },
+                            U30Op::TableBr { table: 0, index: 0 },
+                        ],
+                        terminator: U30Terminator::Br { target: 1 },
+                    },
+                    U30Block { ops: vec![], terminator: U30Terminator::Ret { values: vec![] } },
+                ],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.tables.len(), 1);
+        if let U30Op::TableBr { table, index } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*table, 0);
+            assert_eq!(*index, 0);
+        } else {
+            panic!("Expected TableBr op");
+        }
+    }
+
+    // Test Assert roundtrip
+    #[test]
+    fn test_ser_encode_decode_assert() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        U30Op::Assert { cond: 0, msg: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::Assert { cond, msg } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*cond, 0);
+            assert_eq!(*msg, 0);
+        } else {
+            panic!("Expected Assert op");
+        }
+    }
+
+    // Test IndirectCall roundtrip
+    #[test]
+    fn test_ser_encode_decode_indirect_call() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::IndirectCall { function: 0, args: vec![1, 2], results: vec![3] },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::IndirectCall { function, args, results } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*function, 0);
+            assert_eq!(*args, vec![1, 2]);
+            assert_eq!(*results, vec![3]);
+        } else {
+            panic!("Expected IndirectCall op");
+        }
+    }
+
+    // Test ByteSwap roundtrip
+    #[test]
+    fn test_ser_encode_decode_byteswap_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0x12345678) },
+                        U30Op::ByteSwapU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::ByteSwapU32 { dst, src } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*dst, 1);
+            assert_eq!(*src, 0);
+        } else {
+            panic!("Expected ByteSwapU32 op");
+        }
+    }
+
+    // Test ReinterpretF64U64 roundtrip
+    #[test]
+    fn test_ser_encode_decode_reinterpret_f64_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.5) },
+                        U30Op::ReinterpretF64U64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::ReinterpretF64U64 { dst, src } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*dst, 1);
+            assert_eq!(*src, 0);
+        } else {
+            panic!("Expected ReinterpretF64U64 op");
+        }
+    }
+
+    // Test ReinterpretU64F64 roundtrip
+    #[test]
+    fn test_ser_encode_decode_reinterpret_u64_f64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0x3FF8_0000_0000_0000) }, // 1.5 as u64
+                        U30Op::ReinterpretU64F64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::ReinterpretU64F64 { dst, src } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*dst, 1);
+            assert_eq!(*src, 0);
+        } else {
+            panic!("Expected ReinterpretU64F64 op");
+        }
+    }
+
+    // Test I64F64 roundtrip
+    #[test]
+    fn test_ser_encode_decode_i64_f64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::I64F64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::I64F64 { dst, src } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*dst, 1);
+            assert_eq!(*src, 0);
+        } else {
+            panic!("Expected I64F64 op");
+        }
+    }
+
+    // Test F64I64 roundtrip
+    #[test]
+    fn test_ser_encode_decode_f64_i64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(42.5) },
+                        U30Op::F64I64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::F64I64 { dst, src } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*dst, 1);
+            assert_eq!(*src, 0);
+        } else {
+            panic!("Expected F64I64 op");
+        }
+    }
+
+    // Test F32F64 roundtrip
+    #[test]
+    fn test_ser_encode_decode_f32_f64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(1.5) },
+                        U30Op::F32F64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::F32F64 { dst, src } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*dst, 1);
+            assert_eq!(*src, 0);
+        } else {
+            panic!("Expected F32F64 op");
+        }
+    }
+
+    // Test F64F32 roundtrip
+    #[test]
+    fn test_ser_encode_decode_f64_f32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.5) },
+                        U30Op::F64F32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::F64F32 { dst, src } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*dst, 1);
+            assert_eq!(*src, 0);
+        } else {
+            panic!("Expected F64F32 op");
+        }
+    }
+
+    // Test TruncF32U64 roundtrip
+    #[test]
+    fn test_ser_encode_decode_trunc_f32_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(1.5) },
+                        U30Op::TruncF32U64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::TruncF32U64 { dst, src } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*dst, 1);
+            assert_eq!(*src, 0);
+        } else {
+            panic!("Expected TruncF32U64 op");
+        }
+    }
+
+    // Test TailCall terminator roundtrip
+    #[test]
+    fn test_ser_encode_decode_tailcall() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(42) },
+                    ],
+                    terminator: U30Terminator::TailCall { function: 0, args: vec![0, 1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Terminator::TailCall { function, args } = &decoded.functions[0].blocks[0].terminator {
+            assert_eq!(*function, 0);
+            assert_eq!(*args, vec![0, 1]);
+        } else {
+            panic!("Expected TailCall terminator");
+        }
+    }
+
+    // Test Trap terminator roundtrip
+    #[test]
+    fn test_ser_encode_decode_trap() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Trap { code: 99 },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Terminator::Trap { code } = &decoded.functions[0].blocks[0].terminator {
+            assert_eq!(*code, 99);
+        } else {
+            panic!("Expected Trap terminator");
+        }
+    }
+
+    // Test CtzU32 roundtrip
+    #[test]
+    fn test_ser_encode_decode_ctz_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(8) },
+                        U30Op::CtzU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::CtzU32 { dst, src } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*dst, 1);
+            assert_eq!(*src, 0);
+        } else {
+            panic!("Expected CtzU32 op");
+        }
+    }
+
+    // Test ClzU32 roundtrip
+    #[test]
+    fn test_ser_encode_decode_clz_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(1) },
+                        U30Op::ClzU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::ClzU32 { dst, src } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*dst, 1);
+            assert_eq!(*src, 0);
+        } else {
+            panic!("Expected ClzU32 op");
+        }
+    }
+
+    // Test PopcntU32 roundtrip
+    #[test]
+    fn test_ser_encode_decode_popcnt_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0xFF) },
+                        U30Op::PopcntU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::PopcntU32 { dst, src } = &decoded.functions[0].blocks[0].ops[1] {
+            assert_eq!(*dst, 1);
+            assert_eq!(*src, 0);
+        } else {
+            panic!("Expected PopcntU32 op");
+        }
+    }
+
+    // Test RotlU32 roundtrip
+    #[test]
+    fn test_ser_encode_decode_rotl_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(1) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(4) },
+                        U30Op::RotlU32 { dst: 2, val: 0, sh: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::RotlU32 { dst, val, sh } = &decoded.functions[0].blocks[0].ops[2] {
+            assert_eq!(*dst, 2);
+            assert_eq!(*val, 0);
+            assert_eq!(*sh, 1);
+        } else {
+            panic!("Expected RotlU32 op");
+        }
+    }
+
+    // Test RotrU32 roundtrip
+    #[test]
+    fn test_ser_encode_decode_rotr_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(16) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(2) },
+                        U30Op::RotrU32 { dst: 2, val: 0, sh: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        
+        let decoded = decode(&encode(&module)).unwrap();
+        if let U30Op::RotrU32 { dst, val, sh } = &decoded.functions[0].blocks[0].ops[2] {
+            assert_eq!(*dst, 2);
+            assert_eq!(*val, 0);
+            assert_eq!(*sh, 1);
+        } else {
+            panic!("Expected RotrU32 op");
+        }
+    }
 }

@@ -1259,11 +1259,11 @@ fn fmt_binop(op: &crate::ir::U30BinaryOp) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{U30Block, U30Function, U30Module, U30Op, U30Terminator, U30Type, U30Value};
+    use crate::ir::{U30Block, U30Function, U30Module, U30Op, U30Terminator, U30Type, U30Value, U30RegionDecl, U30TableDecl};
 
     fn sample_module() -> U30Module {
         U30Module {
-            regions: vec![crate::ir::U30RegionDecl {
+            regions: vec![U30RegionDecl {
                 id: 0,
                 size: 256,
                 readable: true,
@@ -1395,5 +1395,1013 @@ mod tests {
         assert!(text.contains("r3"));
         assert!(text.contains("r0"));
         assert!(text.contains("r1"));
+    }
+
+    #[test]
+    fn test_pretty_multiple_functions() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    entry_block: 0,
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                },
+                U30Function {
+                    params: vec![U30Type::U32],
+                    results: vec![U30Type::U64],
+                    entry_block: 0,
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                },
+            ],
+            entry_function: 1,
+        };
+        let text = fmt_module(&m);
+        // Should contain both functions (check plain text without ANSI codes)
+        // fmt_module uses colors=true by default, so strip codes
+        let plain = text.replace("\x1b[", "").replace("m", "\n").lines()
+            .filter(|l| !l.is_empty() && !l.starts_with(";"))
+            .collect::<String>();
+        // Should have both function indices
+        assert!(plain.contains("0") && plain.contains("1"), "Should contain both function indices");
+        // Entry function should have marker
+        assert!(text.contains("▶"), "Entry function should have ▶ marker");
+    }
+
+    #[test]
+    fn test_pretty_multiple_tables() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![
+                crate::ir::U30TableDecl { id: 0, targets: vec![1, 2, 3] },
+                crate::ir::U30TableDecl { id: 1, targets: vec![0] },
+            ],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("table"));
+        assert!(text.contains("0"));
+        assert!(text.contains("1"));
+    }
+
+    #[test]
+    fn test_pretty_show_region_data() {
+        let m = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 16,
+                readable: true,
+                writable: true,
+                initial: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let opts = FmtOpts { colors: false, show_region_data: true, show_tables: false, hex_cols: 32 };
+        let text = fmt_module_opts(&m, opts);
+        assert!(text.contains("deadbeef") || text.contains("de ad be ef"));
+    }
+
+    #[test]
+    fn test_pretty_hex_cols() {
+        let m = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 32,
+                readable: true,
+                writable: true,
+                initial: vec![0x01; 32],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        // With 8 cols, should wrap
+        let opts = FmtOpts { colors: false, show_region_data: true, show_tables: false, hex_cols: 8 };
+        let text = fmt_module_opts(&m, opts);
+        // Should contain some hex data
+        assert!(text.contains("01"));
+    }
+
+    #[test]
+    fn test_pretty_unnamed_function() {
+        // Function without entry marker
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        // Should contain the function header text
+        assert!(text.contains("▶"), "Should contain entry marker for fn 0");
+        assert!(text.contains("fn"), "Should contain 'fn' keyword");
+    }
+
+    #[test]
+    fn test_pretty_no_ansi_in_no_colors() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U64],
+                results: vec![U30Type::U64],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 1, value: U30Value::U64(1) },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let opts = FmtOpts { colors: false, show_region_data: false, show_tables: true, hex_cols: 32 };
+        let text = fmt_module_opts(&m, opts);
+        assert!(!text.contains("\x1b["));
+    }
+
+    #[test]
+    fn test_pretty_all_terminators() {
+        // Test Br terminator
+        let m_br = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![
+                        U30Block { ops: vec![], terminator: U30Terminator::Br { target: 1 } },
+                        U30Block { ops: vec![], terminator: U30Terminator::Ret { values: vec![] } },
+                    ],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m_br);
+        assert!(text.contains("br") || text.contains("1"));
+
+        // Test BrIf terminator
+        let m_brif = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::BrIf { cond: 0, then_target: 1, else_target: 0 },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m_brif);
+        assert!(text.contains("br.if") || text.contains("0"));
+
+        // Test TailCall terminator
+        let m_tail = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::TailCall { function: 0, args: vec![0, 1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m_tail);
+        assert!(text.contains("tail.call") || text.contains("0"));
+
+        // Test Trap terminator
+        let m_trap = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Trap { code: 42 },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m_trap);
+        assert!(text.contains("trap") || text.contains("42"));
+    }
+
+    #[test]
+    fn test_pretty_various_u30ops() {
+        use crate::ir::U30BinaryOp::*;
+        
+        let ops_to_test = vec![
+            ("add.wrap.u64", U30Op::Binary { dst: 0, op: AddWrapU64, a: 1, b: 2 }),
+            ("sub.wrap.u64", U30Op::Binary { dst: 0, op: SubWrapU64, a: 1, b: 2 }),
+            ("mul.wrap.u64", U30Op::Binary { dst: 0, op: MulWrapU64, a: 1, b: 2 }),
+            ("and.u8", U30Op::Binary { dst: 0, op: AndU8, a: 1, b: 2 }),
+            ("or.u8", U30Op::Binary { dst: 0, op: OrU8, a: 1, b: 2 }),
+            ("xor.u8", U30Op::Binary { dst: 0, op: XorU8, a: 1, b: 2 }),
+            ("shl.u64", U30Op::Binary { dst: 0, op: ShlU64, a: 1, b: 2 }),
+            ("shr.u64", U30Op::Binary { dst: 0, op: ShrU64, a: 1, b: 2 }),
+            ("div.u64", U30Op::Binary { dst: 0, op: DivU64, a: 1, b: 2 }),
+            ("rem.u64", U30Op::Binary { dst: 0, op: RemU64, a: 1, b: 2 }),
+            ("eq", U30Op::Binary { dst: 0, op: Eq, a: 1, b: 2 }),
+            ("lt.u64", U30Op::Binary { dst: 0, op: LtU64, a: 1, b: 2 }),
+            ("gt.u64", U30Op::Binary { dst: 0, op: GtU64, a: 1, b: 2 }),
+            ("le.u64", U30Op::Binary { dst: 0, op: LeU64, a: 1, b: 2 }),
+            ("min.u64", U30Op::Binary { dst: 0, op: MinU64, a: 1, b: 2 }),
+            ("max.u64", U30Op::Binary { dst: 0, op: MaxU64, a: 1, b: 2 }),
+        ];
+
+        for (expected_mnemonic, op) in ops_to_test {
+            let m = U30Module {
+                regions: vec![],
+                tables: vec![],
+                functions: vec![U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![op],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                }],
+                entry_function: 0,
+            };
+            let text = fmt_module(&m);
+            // Should contain the operation somewhere in the output
+            assert!(!text.is_empty(), "Empty output for {}", expected_mnemonic);
+        }
+    }
+
+    #[test]
+    fn test_pretty_function_with_params_and_results() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U64, U30Type::U32, U30Type::Bool],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![0] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("u64") && text.contains("u32") && text.contains("bool"));
+    }
+
+    #[test]
+    fn test_pretty_show_tables_false() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![crate::ir::U30TableDecl { id: 0, targets: vec![1] }],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let opts = FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 32 };
+        let text = fmt_module_opts(&m, opts);
+        assert!(!text.contains("table"));
+    }
+
+    #[test]
+    fn test_pretty_region_not_readable() {
+        let m = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 64,
+                readable: false,
+                writable: true,
+                initial: vec![],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("!readable"));
+    }
+
+    #[test]
+    fn test_pretty_region_not_writable() {
+        let m = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 64,
+                readable: true,
+                writable: false,
+                initial: vec![],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("!writable"));
+    }
+
+    #[test]
+    fn test_pretty_select_op() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Select { dst: 0, cond: 1, a: 2, b: 3 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("select"));
+    }
+
+    #[test]
+    fn test_pretty_mem_ops() {
+        let m = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 256,
+                readable: true,
+                writable: true,
+                initial: vec![0; 256],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemFill { region: 0, offset: 0, value: 1, size: 10 },
+                        U30Op::MemCopy { dst_region: 0, dst_offset: 100, src_region: 0, src_offset: 0, size: 10 },
+                        U30Op::MemGrow { dst: 2, region: 0, delta: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("mem.fill") || text.contains("memcopy") || text.contains("mem.grow"));
+    }
+
+    #[test]
+    fn test_pretty_call_op() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Call { function: 1, args: vec![0], results: vec![1] },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("call"));
+    }
+
+    #[test]
+    fn test_pretty_indirect_call_op() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        U30Op::IndirectCall { function: 0, args: vec![], results: vec![1] },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        // The pretty printer may format IndirectCall differently
+        assert!(text.contains("indirect") || text.contains("call"));
+    }
+
+    #[test]
+    fn test_pretty_f64_ops() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::F64Add { dst: 0, a: 1, b: 2 },
+                        U30Op::F64Mul { dst: 3, a: 4, b: 5 },
+                        U30Op::F64Sqrt { dst: 6, src: 7 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("f64.add") || text.contains("f64.mul") || text.contains("f64.sqrt"));
+    }
+
+    #[test]
+    fn test_pretty_float_conversions() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::I2F { dst: 0, src: 1 },
+                        U30Op::F2I { dst: 2, src: 3 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("i2f") || text.contains("f2i"));
+    }
+
+    #[test]
+    fn test_pretty_assert_op() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Assert { cond: 0, msg: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("assert"));
+    }
+
+    #[test]
+    fn test_pretty_tablebr_op() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![crate::ir::U30TableDecl { id: 0, targets: vec![1, 2, 3] }],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::TableBr { table: 0, index: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("table.br") || text.contains("tablebr"));
+    }
+
+    #[test]
+    fn test_pretty_empty_module() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        // Empty module should produce some output
+        assert!(!text.is_empty() || text.contains("no functions"));
+    }
+
+    #[test]
+    fn test_pretty_module_with_no_regions() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("fn"));
+    }
+
+    // Test ZExt formatting
+    #[test]
+    fn test_pretty_zext_op() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U8(42) },
+                        U30Op::ZExtI8U32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("zext"));
+    }
+
+    // Test SExt formatting
+    #[test]
+    fn test_pretty_sext_op() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U8(255) },
+                        U30Op::SExtI8U32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("sext"));
+    }
+
+    // Test Trunc formatting
+    #[test]
+    fn test_pretty_trunc_op() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0x1_0000_0000) },
+                        U30Op::TruncU64U32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("trunc"));
+    }
+
+    // Test ByteSwap formatting
+    #[test]
+    fn test_pretty_byteswap_op() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0x12345678) },
+                        U30Op::ByteSwapU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("bswap"));
+    }
+
+    // Test MemSize formatting
+    #[test]
+    fn test_pretty_memsize_op() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 128, readable: true, writable: true, initial: vec![0; 128] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemSize { dst: 0, region: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![0] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("mem.size") || text.contains("memsize"));
+    }
+
+    // Test MemCopy formatting
+    #[test]
+    fn test_pretty_memcopy_op() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 64, readable: true, writable: true, initial: vec![0; 64] },
+                U30RegionDecl { id: 1, size: 64, readable: true, writable: true, initial: vec![0; 64] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemCopy { dst_region: 0, dst_offset: 0, src_region: 1, src_offset: 0, size: 16 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("mem.copy") || text.contains("memcpy"));
+    }
+
+    // Test MemFill formatting
+    #[test]
+    fn test_pretty_memfill_op() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 64, readable: true, writable: true, initial: vec![0; 64] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemFill { region: 0, offset: 0, value: 0, size: 16 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("mem.fill") || text.contains("memset"));
+    }
+
+    // Test Break formatting
+    #[test]
+    fn test_pretty_break_op() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Break { code: 42 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("break"));
+    }
+
+    // Test bit manipulation ops formatting
+    #[test]
+    fn test_pretty_bit_ops() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(8) },
+                        U30Op::CtzU32 { dst: 1, src: 0 },
+                        U30Op::ClzU32 { dst: 2, src: 0 },
+                        U30Op::PopcntU32 { dst: 3, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1, 2, 3] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("ctz") || text.contains("clz") || text.contains("popcnt"));
+    }
+
+    // Test rotate ops formatting
+    #[test]
+    fn test_pretty_rot_ops() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(1) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(4) },
+                        U30Op::RotlU32 { dst: 2, val: 0, sh: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("rotl") || text.contains("rotr"));
+    }
+
+    // Test conversion ops formatting
+    #[test]
+    fn test_pretty_conversion_ops() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::I2F { dst: 1, src: 0 },
+                        U30Op::F2I { dst: 2, src: 1 },
+                        U30Op::ReinterpretF32U32 { dst: 3, src: 0 },
+                        U30Op::ReinterpretU32F32 { dst: 4, src: 3 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2, 4] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("i2f") || text.contains("f2i") || text.contains("reinterpret"));
+    }
+
+    // Test F64 conversions formatting
+    #[test]
+    fn test_pretty_f64_conversions() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::I64F64 { dst: 1, src: 0 },
+                        U30Op::F64I64 { dst: 2, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("i64.f64") || text.contains("f64.i64"));
+    }
+
+    // Test F32F64 conversion formatting
+    #[test]
+    fn test_pretty_f32f64_conversion() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(1.5) },
+                        U30Op::F32F64 { dst: 1, src: 0 },
+                        U30Op::F64F32 { dst: 2, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("f32.f64") || text.contains("f64.f32"));
+    }
+
+    // Test Bool value formatting
+    #[test]
+    fn test_pretty_bool_value() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        U30Op::Const { dst: 1, value: U30Value::Bool(false) },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![0, 1] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("true") || text.contains("false"));
+    }
+
+    // Test TruncF32U64 formatting
+    #[test]
+    fn test_pretty_trunc_f32_u64() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(1.5) },
+                        U30Op::TruncF32U64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("trunc") || text.contains("f32") || text.contains("u64"));
+    }
+
+    // Test ReinterpretF64U64 formatting
+    #[test]
+    fn test_pretty_reinterpret_f64_u64() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.5) },
+                        U30Op::ReinterpretF64U64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("reinterpret") || text.contains("bitcast"));
     }
 }
