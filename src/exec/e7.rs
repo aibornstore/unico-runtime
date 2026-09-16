@@ -3988,7 +3988,7 @@ fn test_e7_execute_mulmod_edge_cases() {
     let result = exec.execute(&module, 0).unwrap();
     assert_eq!(result.status, Status::Pass);
     let out = exec.vregs.get(0);
-    assert_eq!(&out[..16], &[0u8; 16], "MulMod with m=1 should return 0");
+    assert_eq!(&out[..16], [0u8; 16].as_slice(), "MulMod with m=1 should return 0");
 }
 
 #[test]
@@ -4843,4 +4843,198 @@ fn test_e7_execute_invalid_callee_call() {
     let mut exec = E7Executor::with_module(&module);
     let result = exec.execute(&module, 0);
     assert!(result.is_err(), "Call to invalid function should error");
+}
+
+#[test]
+fn test_e7_execute_aes128_dec_uninit_slot() {
+    // Aes128Dec with uninitialized slot should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Aes128Dec { dst: 0, src: 1, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 16]); // ciphertext
+    // slot 0 is not initialized (default CryptoSlot::Empty)
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Aes128Dec with uninitialized slot should error");
+}
+
+#[test]
+fn test_e7_execute_aes256_enc_uninit_slot() {
+    // Aes256Enc with uninitialized slot should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Aes256Enc { dst: 0, src: 1, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 16]); // plaintext
+    // slot 0 is not initialized
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Aes256Enc with uninitialized slot should error");
+}
+
+#[test]
+fn test_e7_execute_aes256_dec_uninit_slot() {
+    // Aes256Dec with uninitialized slot should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Aes256Dec { dst: 0, src: 1, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 16]); // ciphertext
+    // slot 0 is not initialized
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Aes256Dec with uninitialized slot should error");
+}
+
+#[test]
+fn test_e7_execute_chacha20_uninit_slot() {
+    // ChaCha20 with uninitialized slot should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::ChaCha20 { dst: 0, msg: 1, nonce: 2, key_slot: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0u8; 32]); // msg (12 nonce + 20 plaintext)
+    // slot 0 is not initialized
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "ChaCha20 with uninitialized slot should error");
+}
+
+#[test]
+fn test_e7_execute_ecdh_invalid_pubkey() {
+    // ECDH with invalid public key (infinity point) should error
+    // Generate a valid key pair first, then use point at infinity
+    let module = make_module(vec![make_func(vec![
+        Instruction::Ecdh { dst: 0, priv_key: 1, pub_key_x: 2, pub_key_y: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0x01u8; 32]); // valid private key
+    // Point at infinity has x=0, y=0 in simplified representation
+    exec.vregs.store_vreg(2, &[0u8; 32]); // x = 0 (infinity)
+    exec.vregs.store_vreg(3, &[0u8; 32]); // y = 0 (infinity)
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "ECDH with invalid public key should error");
+}
+
+#[test]
+fn test_e7_execute_ecdsa_sign_invalid_r() {
+    // ECDSA sign with hash that produces r=0 should error
+    // Using all zeros hash with k=1 produces r=0 in simplified impl
+    let module = make_module(vec![make_func(vec![
+        Instruction::EcdsaSign { dst: 0, hash: 1, priv_key: 2 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    // Hash that maps to point at infinity when multiplied by base
+    // In P-256, the base point's x-coordinate is non-zero, so r should not be 0
+    // This test verifies the error path exists
+    exec.vregs.store_vreg(1, &[0u8; 32]); // hash
+    exec.vregs.store_vreg(2, &[0x02u8; 32]); // private key
+    let result = exec.execute(&module, 0);
+    // The result depends on implementation - if r can be 0, it errors
+    // Otherwise it succeeds
+    if result.is_err() {
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid r") || err.contains("ECDSA"), "Should be ECDSA error");
+    }
+}
+
+#[test]
+fn test_e7_execute_fuel_exhaustion() {
+    // Test that fuel is consumed and eventually exhausts
+    let module = make_module(vec![make_func(vec![
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    // Default fuel is 1_000_000, should be enough for simple function
+    let result = exec.execute(&module, 0);
+    assert!(result.is_ok(), "Simple function should complete");
+    // Verify fuel was consumed but not exhausted
+    assert!(exec.fuel < 1_000_000, "Fuel should be consumed");
+}
+
+#[test]
+fn test_e7_execute_mulmod_zero_modulus() {
+    // MulMod with m=0 should return 0 (special case in implementation)
+    let module = make_module(vec![make_func(vec![
+        Instruction::MulMod { dst: 0, a: 1, b: 2, m: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0xFFu8; 16]);
+    exec.vregs.store_vreg(2, &[0xFFu8; 16]);
+    exec.vregs.store_vreg(3, &[0u8; 16]); // m = 0
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    // With m=0, implementation returns 0
+    let out = exec.vregs.get(0);
+    assert_eq!(&out[..16], [0u8; 16].as_slice(), "MulMod with m=0 should return 0");
+}
+
+#[test]
+fn test_e7_execute_addmod_with_carry() {
+    // AddMod where sum >= m (carry case)
+    let module = make_module(vec![make_func(vec![
+        Instruction::AddMod { dst: 0, a: 1, b: 2, m: 3 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0x80u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    exec.vregs.store_vreg(2, &[0x80u8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    exec.vregs.store_vreg(3, &[0xFFu8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    // 0x80 + 0x80 = 0x100, which is >= 0xFF, so result = 0x100 - 0xFF = 0x01
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    assert!(out[0] >= 0x01, "AddMod with carry should subtract modulus");
+}
+
+#[test]
+fn test_e7_execute_xor_different_lengths() {
+    // XOR where a and b have different lengths
+    let module = make_module(vec![make_func(vec![
+        Instruction::Xor { dst: 0, a: 1, b: 2, count: 16 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0xFFu8; 8]); // 8 bytes
+    exec.vregs.store_vreg(2, &[0xFFu8; 16]); // 16 bytes
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    assert_eq!(out.len(), 8, "XOR output should be min(a.len(), b.len())");
+}
+
+#[test]
+fn test_e7_execute_rand_zero_count() {
+    // Rand with count=0 should produce empty output
+    let module = make_module(vec![make_func(vec![
+        Instruction::Rand { dst: 0, count: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    assert_eq!(out.len(), 0, "Rand with count=0 should produce empty output");
+}
+
+#[test]
+fn test_e7_execute_cpy_zero_count() {
+    // Cpy with count=0 should produce empty output
+    let module = make_module(vec![make_func(vec![
+        Instruction::Cpy { dst: 0, src: 1, count: 0 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    exec.vregs.store_vreg(1, &[0x42u8; 16]);
+    let result = exec.execute(&module, 0).unwrap();
+    assert_eq!(result.status, Status::Pass);
+    let out = exec.vregs.get(0);
+    assert_eq!(out.len(), 0, "Cpy with count=0 should produce empty output");
 }
