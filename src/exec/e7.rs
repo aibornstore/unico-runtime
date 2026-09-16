@@ -2226,12 +2226,18 @@ impl E7Executor {
                 Instruction::Sha256 { dst, src, count } => {
                     let src_data = self.load_vreg(*src);
                     let data_len = (*count as usize).min(src_data.len());
+                    if data_len < 1 {
+                        return Err(Error::Format("Sha256: need at least 1 byte input".to_string()));
+                    }
                     let hash = sha256(&src_data[..data_len]);
                     self.store_vreg(*dst, &hash);
                 }
                 Instruction::Blake2S { dst, src, count } => {
                     let src_data = self.load_vreg(*src);
                     let data_len = (*count as usize).min(src_data.len());
+                    if data_len < 1 {
+                        return Err(Error::Format("Blake2S: need at least 1 byte input".to_string()));
+                    }
                     let hash = blake2s_256(&src_data[..data_len], &[]);
                     self.store_vreg(*dst, &hash);
                 }
@@ -2239,6 +2245,9 @@ impl E7Executor {
                     let key_data = self.load_vreg(*key);
                     let msg_data = self.load_vreg(*data);
                     let key_len = (*count as usize).min(key_data.len());
+                    if key_len < 1 {
+                        return Err(Error::Format("Hmac: need at least 1 byte key".to_string()));
+                    }
                     let msg_len = msg_data.len();
                     let hash = hmac_sha256(&key_data[..key_len], &msg_data[..msg_len]);
                     self.store_vreg(*dst, &hash);
@@ -4381,8 +4390,21 @@ fn test_e7_execute_modexp_short_operands() {
 }
 
 #[test]
+fn test_e7_execute_sha256_short_input() {
+    // SHA256 with empty vreg (no input data) should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Sha256 { dst: 0, src: 1, count: 64 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    // vreg 1 is empty (size = 0)
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Sha256 should fail with empty input");
+}
+
+#[test]
 fn test_e7_execute_sha256_zero_count() {
-    // SHA256 with count=0 should produce valid hash (just hashing empty slice)
+    // SHA256 with count=0 but non-empty vreg should error (need at least 1 byte)
     let module = make_module(vec![make_func(vec![
         Instruction::Sha256 { dst: 0, src: 1, count: 0 },
         Instruction::Ret,
@@ -4390,12 +4412,25 @@ fn test_e7_execute_sha256_zero_count() {
     let mut exec = E7Executor::with_module(&module);
     exec.vregs.store_vreg(1, &[0u8; 64]); // data available but count=0
     let result = exec.execute(&module, 0);
-    assert!(result.is_ok(), "Sha256 with count=0 should succeed");
+    assert!(result.is_err(), "Sha256 with count=0 should fail (need at least 1 byte)");
+}
+
+#[test]
+fn test_e7_execute_blake2s_short_input() {
+    // Blake2S with empty vreg should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Blake2S { dst: 0, src: 1, count: 32 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    // vreg 1 is empty
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Blake2S should fail with empty input");
 }
 
 #[test]
 fn test_e7_execute_blake2s_zero_count() {
-    // Blake2S with count=0 should produce valid hash
+    // Blake2S with count=0 but non-empty vreg should error
     let module = make_module(vec![make_func(vec![
         Instruction::Blake2S { dst: 0, src: 1, count: 0 },
         Instruction::Ret,
@@ -4403,12 +4438,26 @@ fn test_e7_execute_blake2s_zero_count() {
     let mut exec = E7Executor::with_module(&module);
     exec.vregs.store_vreg(1, &[0u8; 64]); // data available but count=0
     let result = exec.execute(&module, 0);
-    assert!(result.is_ok(), "Blake2S with count=0 should succeed");
+    assert!(result.is_err(), "Blake2S with count=0 should fail");
+}
+
+#[test]
+fn test_e7_execute_hmac_short_key() {
+    // HMAC with empty key vreg should error
+    let module = make_module(vec![make_func(vec![
+        Instruction::Hmac { dst: 0, key: 1, data: 2, count: 32 },
+        Instruction::Ret,
+    ], 0)]);
+    let mut exec = E7Executor::with_module(&module);
+    // vreg 1 is empty
+    exec.vregs.store_vreg(2, &[0u8; 32]);
+    let result = exec.execute(&module, 0);
+    assert!(result.is_err(), "Hmac should fail with empty key");
 }
 
 #[test]
 fn test_e7_execute_hmac_zero_count() {
-    // HMAC with count=0 should work (key truncated to 0 bytes)
+    // HMAC with count=0 should fail (key would be 0 bytes)
     let module = make_module(vec![make_func(vec![
         Instruction::Hmac { dst: 0, key: 1, data: 2, count: 0 },
         Instruction::Ret,
@@ -4417,7 +4466,7 @@ fn test_e7_execute_hmac_zero_count() {
     exec.vregs.store_vreg(1, &[0u8; 32]); // key available but count=0
     exec.vregs.store_vreg(2, &[0u8; 32]);
     let result = exec.execute(&module, 0);
-    assert!(result.is_ok(), "Hmac with count=0 should succeed");
+    assert!(result.is_err(), "Hmac with count=0 should fail (need at least 1 byte key)");
 }
 
 #[test]
