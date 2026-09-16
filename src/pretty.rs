@@ -1259,7 +1259,7 @@ fn fmt_binop(op: &crate::ir::U30BinaryOp) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{U30Block, U30Function, U30Module, U30Op, U30Terminator, U30Type, U30Value, U30RegionDecl, U30TableDecl};
+    use crate::ir::{U30Block, U30Function, U30Module, U30Op, U30Terminator, U30Type, U30Value, U30RegionDecl};
 
     fn sample_module() -> U30Module {
         U30Module {
