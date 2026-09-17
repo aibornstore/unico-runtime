@@ -110,3 +110,120 @@ impl CryptoSlot {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_crypto_slot_empty_encrypt_fails() {
+        let slot = CryptoSlot::Empty;
+        let result = slot.encrypt(b"test data", None);
+        assert!(result.is_err(), "Empty slot encrypt should fail");
+    }
+
+    #[test]
+    fn test_crypto_slot_empty_decrypt_fails() {
+        let slot = CryptoSlot::Empty;
+        let result = slot.decrypt(b"test data", None);
+        assert!(result.is_err(), "Empty slot decrypt should fail");
+    }
+
+    #[test]
+    fn test_crypto_slot_poly1305_decrypt_fails() {
+        let key = [0x42u8; 32];
+        let slot = CryptoSlot::Poly1305 { key };
+        let result = slot.decrypt(b"some ciphertext", None);
+        assert!(result.is_err(), "Poly1305 decrypt should fail");
+    }
+
+    #[test]
+    fn test_crypto_slot_chacha20_encrypt_requires_nonce() {
+        let key = [0x42u8; 32];
+        let slot = CryptoSlot::ChaCha20 { key };
+        let result = slot.encrypt(b"test data", None);
+        assert!(result.is_err(), "ChaCha20 encrypt without nonce should fail");
+    }
+
+    #[test]
+    fn test_crypto_slot_chacha20_decrypt_requires_nonce() {
+        let key = [0x42u8; 32];
+        let slot = CryptoSlot::ChaCha20 { key };
+        let result = slot.decrypt(b"test data", None);
+        assert!(result.is_err(), "ChaCha20 decrypt without nonce should fail");
+    }
+
+    #[test]
+    fn test_crypto_slot_chacha20_encrypt_decrypt_roundtrip() {
+        let key = [0x42u8; 32];
+        let slot = CryptoSlot::ChaCha20 { key };
+        let nonce: [u8; 12] = [0u8; 12];
+        let plaintext = b"Hello, ChaCha20!";
+        let ct = slot.encrypt(plaintext, Some(&nonce)).unwrap();
+        let pt = slot.decrypt(&ct, Some(&nonce)).unwrap();
+        assert_eq!(&pt[..], plaintext, "ChaCha20 roundtrip");
+    }
+
+    #[test]
+    fn test_crypto_slot_chacha20_different_nonces_different_output() {
+        let key = [0x42u8; 32];
+        let slot = CryptoSlot::ChaCha20 { key };
+        let nonce1: [u8; 12] = [0u8; 12];
+        let nonce2: [u8; 12] = [1u8; 12];
+        let plaintext = b"Test message";
+        let ct1 = slot.encrypt(plaintext, Some(&nonce1)).unwrap();
+        let ct2 = slot.encrypt(plaintext, Some(&nonce2)).unwrap();
+        assert_ne!(&ct1[..], &ct2[..], "Different nonces should produce different ciphertext");
+    }
+
+    #[test]
+    fn test_crypto_slot_poly1305_encrypt_produces_tag() {
+        let key = [0x42u8; 32];
+        let slot = CryptoSlot::Poly1305 { key };
+        let result = slot.encrypt(b"test message", None).unwrap();
+        assert_eq!(result.len(), 16, "Poly1305 should produce 16-byte tag");
+    }
+
+    #[test]
+    fn test_crypto_slot_is_empty() {
+        let empty = CryptoSlot::Empty;
+        assert!(empty.is_empty(), "Empty slot should be empty");
+        let key = [0u8; 32];
+        let aes = CryptoSlot::Aes128 { round_keys: [0u8; 176] };
+        assert!(!aes.is_empty(), "Aes128 slot should not be empty");
+        let chacha = CryptoSlot::ChaCha20 { key };
+        assert!(!chacha.is_empty(), "ChaCha20 slot should not be empty");
+    }
+
+    #[test]
+    fn test_crypto_slot_aes128_encrypt_short_data_fails() {
+        let round_keys = [0u8; 176];
+        let slot = CryptoSlot::Aes128 { round_keys };
+        let result = slot.encrypt(&[0u8; 8], None);
+        assert!(result.is_err(), "AES128 encrypt with short data should fail");
+    }
+
+    #[test]
+    fn test_crypto_slot_aes256_encrypt_short_data_fails() {
+        let round_keys = [0u8; 240];
+        let slot = CryptoSlot::Aes256 { round_keys };
+        let result = slot.encrypt(&[0u8; 8], None);
+        assert!(result.is_err(), "AES256 encrypt with short data should fail");
+    }
+
+    #[test]
+    fn test_crypto_slot_aes128_decrypt_short_data_fails() {
+        let round_keys = [0u8; 176];
+        let slot = CryptoSlot::Aes128 { round_keys };
+        let result = slot.decrypt(&[0u8; 8], None);
+        assert!(result.is_err(), "AES128 decrypt with short data should fail");
+    }
+
+    #[test]
+    fn test_crypto_slot_aes256_decrypt_short_data_fails() {
+        let round_keys = [0u8; 240];
+        let slot = CryptoSlot::Aes256 { round_keys };
+        let result = slot.decrypt(&[0u8; 8], None);
+        assert!(result.is_err(), "AES256 decrypt with short data should fail");
+    }
+}
