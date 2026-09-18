@@ -1646,4 +1646,242 @@ mod tests {
         assert_eq!(E3_PAGE_SIZE, 4096);
         assert_eq!(E3_MEMORY_SIZE, 4096);
     }
+
+    // === Clone for E3Module (5/5 uncovered) ===
+    #[test]
+    fn test_e3_module_clone() {
+        let bytes = build_e3(&[
+            Instruction::KImm { dst: 0, value: 123 },
+            Instruction::Ret,
+        ]);
+        let module = E3Module::parse(&bytes).expect("parse failed");
+        // Clone the module — calls Clone::clone for E3Module
+        let cloned = module.clone();
+        assert_eq!(cloned.functions.len(), 1);
+        assert_eq!(cloned.memory.len(), E3_MEMORY_SIZE);
+        // Execute from the cloned module
+        let mut exec = E3Executor::new();
+        let result = exec.execute(&cloned).expect("execute failed");
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(123));
+    }
+
+    // === Default for E3Executor (3/3 uncovered) ===
+    #[test]
+    fn test_e3_executor_default() {
+        // E3Executor::default() calls Self::new()
+        let exec: E3Executor = Default::default();
+        assert!(exec.functions.is_empty());
+        assert!(exec.frames.is_empty());
+        assert_eq!(exec.memory.len(), E3_MEMORY_SIZE);
+        assert_eq!(exec.fuel, 100_000);
+    }
+
+    // === decode_instruction: truncated ULEB error paths ===
+    #[test]
+    fn test_e3_decode_truncated_uleb_dst() {
+        let bytes = vec![0x00, 0xFF];
+        let result = decode_instruction(&bytes, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e3_decode_truncated_uleb_value() {
+        let bytes = vec![0x00, 0x01, 0xFF];
+        let result = decode_instruction(&bytes, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e3_decode_truncated_add() {
+        let bytes = vec![0x0b, 0x01, 0xFF];
+        let result = decode_instruction(&bytes, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e3_decode_truncated_load_i64() {
+        let bytes = vec![0x91, 0x08, 0xFF];
+        let result = decode_instruction(&bytes, 0);
+        assert!(result.is_err());
+    }
+
+    // === decode_instruction: MEM.SIZE (0x99) — single byte, no operands ===
+    #[test]
+    fn test_e3_decode_memsize() {
+        let bytes = vec![0x99];
+        let (instr, pos) = decode_instruction(&bytes, 0).expect("decode failed");
+        assert!(matches!(instr, Instruction::MemSize));
+        assert_eq!(pos, 1); // consumed exactly 1 byte
+    }
+
+    // === run_function: empty functions list ===
+    #[test]
+    fn test_e3_execute_empty_functions() {
+        let mut exec = E3Executor::new();
+        // Execute with empty functions list
+        exec.functions.clear();
+        exec.memory = vec![0u8; E3_MEMORY_SIZE];
+        exec.fuel = 100;
+        exec.start = Instant::now();
+        let result = exec.execute(&E3Module { functions: vec![], memory: vec![0u8; E3_MEMORY_SIZE] });
+        assert!(result.is_ok()); // returns Ok with fail status
+        assert_eq!(result.unwrap().status, Status::Fail);
+    }
+
+    // === run_function: fuel exhaustion (explicit test) ===
+    #[test]
+    fn test_e3_fuel_exhausted() {
+        let bytes = build_e3(&[
+            Instruction::KImm { dst: 0, value: 1 },
+            Instruction::Br { target: 0 }, // infinite loop
+        ]);
+        let module = E3Module::parse(&bytes).expect("parse failed");
+        let mut exec = E3Executor::new();
+        exec.fuel = 3; // very limited fuel
+        let result = exec.execute(&module);
+        assert!(result.is_ok()); // returns Ok with fail status
+        assert_eq!(result.unwrap().status, Status::Fail);
+    }
+
+    // === execute: provenance on empty functions ===
+    #[test]
+    fn test_e3_execute_empty_module_error() {
+        let mut exec = E3Executor::new();
+        let result = exec.execute(&E3Module { functions: vec![], memory: vec![0u8; E3_MEMORY_SIZE] });
+        assert!(result.is_ok()); // returns Ok with ExecutionResult::Fail
+        assert_eq!(result.unwrap().status, Status::Fail);
+    }
+
+    // === Instruction Clone coverage ===
+    #[test]
+    fn test_e3_instruction_clone() {
+        let instr = Instruction::KImm { dst: 5, value: 999 };
+        let cloned = instr.clone();
+        assert!(matches!(cloned, Instruction::KImm { dst: 5, value: 999 }));
+    }
+
+    // === encode_instr: unused instruction variants ===
+    #[test]
+    fn test_e3_encode_sub_i64() {
+        let instr = Instruction::SubI64 { dst: 0, a: 1, b: 2 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x10);
+    }
+
+    #[test]
+    fn test_e3_encode_mul_i64() {
+        let instr = Instruction::MulI64 { dst: 0, a: 1, b: 2 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x11);
+    }
+
+    #[test]
+    fn test_e3_encode_div_i64() {
+        let instr = Instruction::DivI64 { dst: 0, a: 1, b: 2 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x12);
+    }
+
+    // === run_function: Call instruction (multi-function module) ===
+    // === encode_instr: encode all instruction variants ===
+    #[test]
+    fn test_e3_encode_call() {
+        let instr = Instruction::Call { callee: 5 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x8f); // CALL opcode
+    }
+
+    #[test]
+    fn test_e3_encode_br() {
+        let instr = Instruction::Br { target: 3 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x8d); // BR opcode
+    }
+
+    #[test]
+    fn test_e3_encode_brif() {
+        let instr = Instruction::BrIf { cond: 1, target: 2 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x8e); // BR.IF opcode
+    }
+
+    #[test]
+    fn test_e3_encode_trap() {
+        let instr = Instruction::Trap;
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x9f); // TRAP opcode
+    }
+
+    #[test]
+    fn test_e3_encode_cmp() {
+        let instr = Instruction::Cmp { pred: 1, dst: 0, a: 1, b: 2 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x8c); // CMP opcode
+    }
+
+    #[test]
+    fn test_e3_encode_load_i32() {
+        let instr = Instruction::LoadI32 { dst: 0, addr: 16 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x93);
+    }
+
+    #[test]
+    fn test_e3_encode_store_i32() {
+        let instr = Instruction::StoreI32 { addr: 16, src: 0 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x94);
+    }
+
+    #[test]
+    fn test_e3_encode_load_u32() {
+        let instr = Instruction::LoadU32 { dst: 0, addr: 16 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x97);
+    }
+
+    #[test]
+    fn test_e3_encode_store_u32() {
+        let instr = Instruction::StoreU32 { addr: 16, src: 0 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x98);
+    }
+
+    #[test]
+    fn test_e3_encode_load_u64() {
+        let instr = Instruction::LoadU64 { dst: 0, addr: 16 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x95);
+    }
+
+    #[test]
+    fn test_e3_encode_store_u64() {
+        let instr = Instruction::StoreU64 { addr: 16, src: 0 };
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x96);
+    }
+
+    #[test]
+    fn test_e3_encode_memsize() {
+        let instr = Instruction::MemSize;
+        let mut buf = Vec::new();
+        encode_instr(&instr, &mut buf);
+        assert_eq!(buf[0], 0x99);
+        assert_eq!(buf.len(), 1); // single byte
+    }
 }
