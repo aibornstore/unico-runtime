@@ -419,7 +419,6 @@ mod tests {
     #[test]
     fn test_verify_empty_functions() {
         // Module with no functions — build manually
-        let bytes = b"UNICO\xe0".to_vec();
         let module = Module { profile: Profile::E0, functions: vec![] };
         let r = module.verify();
         assert!(r.is_err());

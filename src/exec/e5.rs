@@ -1098,7 +1098,6 @@ mod tests {
     fn test_e5_parse_func_trailing_bytes() {
         let bytes = build_e5(&[Instruction::Ret]);
         // Insert garbage between FUNC payload end and CODE section
-        let mut bytes = bytes;
         // Find position after FUNC section (magic=6, 0x02 at 6, ULEB at 7, func_count at 8)
         // FUNC payload: starts at 7 (after 0x02), length at 7, func_count at 8
         // Each ULEB for func header = 1 byte (values 1, 1, 16, 0, N)

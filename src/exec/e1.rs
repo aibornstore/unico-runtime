@@ -603,7 +603,7 @@ mod tests {
     #[test]
     fn test_parse_func_section_mismatch() {
         // Build with wrong FUNC payload size
-        let mut module_bytes = vec![
+        let module_bytes = vec![
             b'U', b'N', b'I', b'C', b'O', 0xe1, // Magic
             0x02, // FUNC tag
             0x03, // FUNC payload len = 3 (WRONG - should be 6)
@@ -668,7 +668,7 @@ mod tests {
     fn test_parse_unknown_opcode() {
         // Create a module with an unknown opcode in the code
         // Use low-level byte construction to avoid format issues
-        let mut module_bytes = vec![
+        let module_bytes = vec![
             b'U', b'N', b'I', b'C', b'O', 0xe1, // Magic
             0x02, // FUNC tag
             0x06, // FUNC payload len

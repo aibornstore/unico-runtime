@@ -4378,8 +4378,6 @@ mod tests {
     // Test multiple ops in one module
     #[test]
     fn test_pretty_all_ops_in_one_module() {
-        use crate::ir::U30BinaryOp::*;
-
         let m = U30Module {
             regions: vec![
                 U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
