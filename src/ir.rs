@@ -781,3 +781,41 @@ impl U30Module {
         Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_u30value_as_i64_fails_on_f64() {
+        let v = U30Value::F64(3.14);
+        let r = v.as_i64();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("type error"));
+    }
+
+    #[test]
+    fn test_u30value_as_i64_fails_on_bool() {
+        let v = U30Value::Bool(true);
+        let r = v.as_i64();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_u30value_as_f64_fails_on_u64() {
+        let v = U30Value::U64(42);
+        let r = v.as_f64();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_u30value_as_f32_fails_on_u64() {
+        let v = U30Value::U64(42);
+        let r = v.as_f32();
+        assert!(r.is_err());
+    }
+}
