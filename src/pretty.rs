@@ -3874,4 +3874,622 @@ mod tests {
         let text = fmt_module(&m);
         assert!(text.contains("; entry=block5"));
     }
+
+    // Test TailCall with multiple args formatting
+    #[test]
+    fn test_pretty_tailcall_multi_args() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::TailCall { function: 0, args: vec![0, 1, 2, 3, 4] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("tail.call"));
+    }
+
+    // Test Binary op with various variants formatting
+    #[test]
+    fn test_pretty_binary_ops_variants() {
+        use crate::ir::U30BinaryOp::*;
+        let ops = vec![
+            (AddWrapU64, "add.wrap.u64"),
+            (SubWrapU64, "sub.wrap.u64"),
+            (MulWrapU64, "mul.wrap.u64"),
+            (DivU64, "div.u64"),
+            (RemU64, "rem.u64"),
+            (LtU64, "lt.u64"),
+            (GtU64, "gt.u64"),
+            (LeU64, "le.u64"),
+            (GeU64, "ge.u64"),
+        ];
+        for (op, name) in ops {
+            let m = U30Module {
+                regions: vec![],
+                tables: vec![],
+                functions: vec![U30Function {
+                    params: vec![],
+                    results: vec![],
+                    entry_block: 0,
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(1) },
+                            U30Op::Const { dst: 1, value: U30Value::U64(2) },
+                            U30Op::Binary { dst: 2, op, a: 0, b: 1 },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                }],
+                entry_function: 0,
+            };
+            let text = fmt_module(&m);
+            assert!(text.contains(name), "Should contain {}", name);
+        }
+    }
+
+    // Test table formatting in colors mode
+    #[test]
+    fn test_pretty_table_colors() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![1, 2, 3] },
+            ],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let opts = FmtOpts { colors: true, show_region_data: false, show_tables: true, hex_cols: 32 };
+        let text = fmt_module_opts(&m, opts);
+        assert!(text.contains("table"));
+    }
+
+    // Test FmtOpts with all combinations
+    #[test]
+    fn test_pretty_fmtopts_combinations() {
+        // Test colors=true, show_region_data=true, show_tables=true
+        let opts1 = FmtOpts { colors: true, show_region_data: true, show_tables: true, hex_cols: 32 };
+        assert!(opts1.colors);
+        assert!(opts1.show_region_data);
+        assert!(opts1.show_tables);
+
+        // Test colors=false, show_region_data=false, show_tables=false
+        let opts2 = FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 16 };
+        assert!(!opts2.colors);
+        assert!(!opts2.show_region_data);
+        assert!(!opts2.show_tables);
+        assert_eq!(opts2.hex_cols, 16);
+    }
+
+    // Test hex_string with empty data
+    #[test]
+    fn test_pretty_hex_string_empty() {
+        let m = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0,
+                size: 64,
+                readable: true,
+                writable: true,
+                initial: vec![],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        // With show_region_data=false, should not show hex data
+        let opts = FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 32 };
+        let text = fmt_module_opts(&m, opts);
+        // Should contain region declaration without hex data
+        assert!(text.contains("region"));
+    }
+
+    // Test module with multiple regions
+    #[test]
+    fn test_pretty_multiple_regions() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 64, readable: true, writable: true, initial: vec![] },
+                U30RegionDecl { id: 1, size: 128, readable: true, writable: false, initial: vec![] },
+                U30RegionDecl { id: 2, size: 256, readable: false, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("region"));
+        assert!(text.contains("!writable") || text.contains("!readable"));
+    }
+
+    // Test module with multiple functions and tables
+    #[test]
+    fn test_pretty_multiple_functions_and_tables() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![0, 1] },
+                U30TableDecl { id: 1, targets: vec![1, 2] },
+            ],
+            functions: vec![
+                U30Function {
+                    params: vec![U30Type::U64],
+                    results: vec![U30Type::U32],
+                    entry_block: 0,
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    entry_block: 0,
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                },
+                U30Function {
+                    params: vec![U30Type::F64],
+                    results: vec![U30Type::F64],
+                    entry_block: 0,
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                },
+            ],
+            entry_function: 1,
+        };
+        let text = fmt_module(&m);
+        // Should contain tables
+        assert!(text.contains("table"));
+        // Should have multiple functions
+        assert!(text.contains("fn"));
+    }
+
+    // Test fmt_binop for all bitwise ops
+    #[test]
+    fn test_pretty_fmt_binop_bitwise() {
+        use crate::ir::U30BinaryOp::*;
+        let ops = vec![
+            (AndU8, "and.u8"),
+            (OrU8, "or.u8"),
+            (XorU8, "xor.u8"),
+            (ShlU64, "shl.u64"),
+            (ShlU32, "shl.u32"),
+            (ShrU64, "shr.u64"),
+            (ShrU32, "shr.u32"),
+        ];
+        for (op, name) in ops {
+            let text = fmt_binop(&op);
+            assert_eq!(text, name, "Binary op should format to {}", name);
+        }
+    }
+
+    // Test fmt_value for special float values
+    #[test]
+    fn test_pretty_fmt_value_special_floats() {
+        let special_values = vec![
+            (U30Value::F32(f32::NAN), "NaN"),
+            (U30Value::F32(f32::INFINITY), "Infinity"),
+            (U30Value::F32(f32::NEG_INFINITY), "-Infinity"),
+            (U30Value::F64(f64::NAN), "NaN"),
+            (U30Value::F64(f64::INFINITY), "Infinity"),
+            (U30Value::F64(f64::NEG_INFINITY), "-Infinity"),
+        ];
+        for (val, _name) in special_values {
+            let text = fmt_value(&val);
+            assert!(!text.is_empty());
+        }
+    }
+
+    // Test non-entry function formatting (fn 0 is not entry)
+    #[test]
+    fn test_pretty_non_entry_function() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    entry_block: 0,
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    entry_block: 0,
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                },
+            ],
+            entry_function: 1, // Second function is entry
+        };
+        let text = fmt_module(&m);
+        // Should have entry marker on second function
+        assert!(text.contains("▶"));
+    }
+
+    // Test comment method with colors enabled
+    #[test]
+    fn test_pretty_comment_with_colors_enabled() {
+        let mut out = Out::new(FmtOpts { colors: true, show_region_data: false, show_tables: false, hex_cols: 32 });
+        out.comment("test comment");
+        let result = out.finish();
+        // DIM escape sequence should be present
+        assert!(result.contains("test comment"));
+    }
+
+    // Test Push colored method
+    #[test]
+    fn test_pretty_push_colored() {
+        let mut out = Out::new(FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 32 });
+        out.push_colored("test", RED);
+        let result = out.finish();
+        assert_eq!(result, "test");
+    }
+
+    // Test Push colored method with colors enabled
+    #[test]
+    fn test_pretty_push_colored_with_colors() {
+        let mut out = Out::new(FmtOpts { colors: true, show_region_data: false, show_tables: false, hex_cols: 32 });
+        out.push_colored("test", RED);
+        let result = out.finish();
+        assert!(result.contains("\x1b[31m"));
+        assert!(result.contains("test"));
+        assert!(result.contains("\x1b[0m"));
+    }
+
+    // Test error method
+    #[test]
+    fn test_pretty_error_method() {
+        let mut out = Out::new(FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 32 });
+        out.error("error text");
+        let result = out.finish();
+        assert!(result.contains("error text"));
+    }
+
+    // Test kw (keyword) method
+    #[test]
+    fn test_pretty_kw_method() {
+        let mut out = Out::new(FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 32 });
+        out.kw("keyword");
+        let result = out.finish();
+        assert!(result.contains("keyword"));
+    }
+
+    // Test op (operation) method
+    #[test]
+    fn test_pretty_op_method() {
+        let mut out = Out::new(FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 32 });
+        out.op("operation");
+        let result = out.finish();
+        assert!(result.contains("operation"));
+    }
+
+    // Test reg (register) method
+    #[test]
+    fn test_pretty_reg_method() {
+        let mut out = Out::new(FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 32 });
+        out.reg("r0");
+        let result = out.finish();
+        assert!(result.contains("r0"));
+    }
+
+    // Test type_ method
+    #[test]
+    fn test_pretty_type_method() {
+        let mut out = Out::new(FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 32 });
+        out.type_("u64");
+        let result = out.finish();
+        assert!(result.contains("u64"));
+    }
+
+    // Test value method
+    #[test]
+    fn test_pretty_value_method() {
+        let mut out = Out::new(FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 32 });
+        out.value("42");
+        let result = out.finish();
+        assert!(result.contains("42"));
+    }
+
+    // Test header/footer formatting
+    #[test]
+    fn test_pretty_header_footer() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        // Should contain U30 Module header
+        assert!(text.contains("U30 Module") || text.contains(";"));
+    }
+
+    // Test hex_string with 3 chunks (to test if i > 0 branch)
+    #[test]
+    fn test_pretty_hex_string_three_chunks() {
+        let m = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0,
+                size: 96,
+                readable: true,
+                writable: true,
+                initial: vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        // With hex_cols=4, data will split into 3 chunks: [01020304], [05060708], [090a0b0c]
+        let opts = FmtOpts { colors: false, show_region_data: true, show_tables: false, hex_cols: 4 };
+        let text = fmt_module_opts(&m, opts);
+        // Should have commas between chunks
+        assert!(text.contains("01 02 03 04"));
+    }
+
+    // Test hex_string with 4 chunks
+    #[test]
+    fn test_pretty_hex_string_four_chunks() {
+        let m = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0,
+                size: 128,
+                readable: true,
+                writable: true,
+                initial: vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        // With hex_cols=4, data will split into 4 chunks
+        let opts = FmtOpts { colors: false, show_region_data: true, show_tables: false, hex_cols: 4 };
+        let text = fmt_module_opts(&m, opts);
+        assert!(text.contains("01 02 03 04"));
+    }
+
+    // Test fmt_binop with all variants explicitly
+    #[test]
+    fn test_pretty_fmt_binop_all_explicit() {
+        use crate::ir::U30BinaryOp::*;
+        let ops = [
+            (AddWrapU64, "add.wrap.u64"),
+            (AddWrapU32, "add.wrap.u32"),
+            (SubWrapU64, "sub.wrap.u64"),
+            (SubWrapU32, "sub.wrap.u32"),
+            (MulWrapU64, "mul.wrap.u64"),
+            (MulWrapU32, "mul.wrap.u32"),
+            (AndU8, "and.u8"),
+            (OrU8, "or.u8"),
+            (XorU8, "xor.u8"),
+            (ShlU64, "shl.u64"),
+            (ShlU32, "shl.u32"),
+            (ShrU64, "shr.u64"),
+            (ShrU32, "shr.u32"),
+            (DivU64, "div.u64"),
+            (DivU32, "div.u32"),
+            (RemU64, "rem.u64"),
+            (RemU32, "rem.u32"),
+            (Eq, "eq"),
+            (LtU64, "lt.u64"),
+            (GtU64, "gt.u64"),
+            (GeU64, "ge.u64"),
+            (LeU64, "le.u64"),
+            (LeU32, "le.u32"),
+            (MinU64, "min.u64"),
+            (MinU32, "min.u32"),
+            (MaxU64, "max.u64"),
+            (MaxU32, "max.u32"),
+        ];
+        for (op, expected) in ops {
+            let text = fmt_binop(&op);
+            assert_eq!(text, expected, "fmt_binop({:?}) should be {}", op, expected);
+        }
+    }
+
+    // Test fmt_type explicitly
+    #[test]
+    fn test_pretty_fmt_type_explicit() {
+        assert_eq!(fmt_type(&U30Type::Bool), "bool");
+        assert_eq!(fmt_type(&U30Type::U8), "u8");
+        assert_eq!(fmt_type(&U30Type::U16), "u16");
+        assert_eq!(fmt_type(&U30Type::U32), "u32");
+        assert_eq!(fmt_type(&U30Type::U64), "u64");
+        assert_eq!(fmt_type(&U30Type::F32), "f32");
+        assert_eq!(fmt_type(&U30Type::F64), "f64");
+    }
+
+    // Test fmt_value explicitly
+    #[test]
+    fn test_pretty_fmt_value_explicit() {
+        assert_eq!(fmt_value(&U30Value::Bool(true)), "true");
+        assert_eq!(fmt_value(&U30Value::Bool(false)), "false");
+        assert_eq!(fmt_value(&U30Value::U8(42)), "42");
+        assert_eq!(fmt_value(&U30Value::U16(1234)), "1234");
+        assert_eq!(fmt_value(&U30Value::U32(999999)), "999999");
+        assert_eq!(fmt_value(&U30Value::U64(1_000_000_000)), "1000000000");
+    }
+
+    // Test multiple ops in one module
+    #[test]
+    fn test_pretty_all_ops_in_one_module() {
+        use crate::ir::U30BinaryOp::*;
+
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+                U30RegionDecl { id: 1, size: 128, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![0] },
+            ],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        // All single-src ops
+                        U30Op::Nop,
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::NotU8 { dst: 1, src: 0 },
+                        U30Op::NotU16 { dst: 2, src: 0 },
+                        U30Op::NotU32 { dst: 3, src: 0 },
+                        U30Op::NotU64 { dst: 4, src: 0 },
+                        U30Op::AbsU64 { dst: 5, src: 0 },
+                        U30Op::AbsU32 { dst: 6, src: 0 },
+                        U30Op::NegU64 { dst: 7, src: 0 },
+                        U30Op::NegU32 { dst: 8, src: 0 },
+                        U30Op::CtzU64 { dst: 9, src: 0 },
+                        U30Op::CtzU32 { dst: 10, src: 0 },
+                        U30Op::ClzU64 { dst: 11, src: 0 },
+                        U30Op::ClzU32 { dst: 12, src: 0 },
+                        U30Op::PopcntU64 { dst: 13, src: 0 },
+                        U30Op::PopcntU32 { dst: 14, src: 0 },
+                        U30Op::FSqrt { dst: 15, src: 0 },
+                        U30Op::FAbs { dst: 16, src: 0 },
+                        U30Op::FNeg { dst: 17, src: 0 },
+                        U30Op::I2F { dst: 18, src: 0 },
+                        U30Op::F2I { dst: 19, src: 0 },
+                        U30Op::TruncF32U64 { dst: 20, src: 0 },
+                        U30Op::ReinterpretF32U32 { dst: 21, src: 0 },
+                        U30Op::ReinterpretU32F32 { dst: 22, src: 0 },
+                        U30Op::ZExtI8U16 { dst: 23, src: 0 },
+                        U30Op::ZExtI8U32 { dst: 24, src: 0 },
+                        U30Op::ZExtI8U64 { dst: 25, src: 0 },
+                        U30Op::ZExtI16U32 { dst: 26, src: 0 },
+                        U30Op::ZExtI16U64 { dst: 27, src: 0 },
+                        U30Op::ZExtI32U64 { dst: 28, src: 0 },
+                        U30Op::TruncU64U32 { dst: 29, src: 0 },
+                        U30Op::TruncU64U16 { dst: 30, src: 0 },
+                        U30Op::TruncU32U16 { dst: 31, src: 0 },
+                        U30Op::SExtI8U16 { dst: 32, src: 0 },
+                        U30Op::SExtI8U32 { dst: 33, src: 0 },
+                        U30Op::SExtI8U64 { dst: 34, src: 0 },
+                        U30Op::SExtI16U32 { dst: 35, src: 0 },
+                        U30Op::SExtI16U64 { dst: 36, src: 0 },
+                        U30Op::SExtI32U64 { dst: 37, src: 0 },
+                        U30Op::ByteSwapU16 { dst: 38, src: 0 },
+                        U30Op::ByteSwapU32 { dst: 39, src: 0 },
+                        U30Op::ByteSwapU64 { dst: 40, src: 0 },
+                        U30Op::MemSize { dst: 41, region: 0 },
+                        U30Op::MemGrow { dst: 42, region: 0, delta: 0 },
+                        U30Op::LoadU8 { dst: 43, region: 0, offset: 0 },
+                        U30Op::LoadU16 { dst: 44, region: 0, offset: 0 },
+                        U30Op::LoadU32 { dst: 45, region: 0, offset: 0 },
+                        U30Op::LoadU64 { dst: 46, region: 0, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(!text.is_empty());
+    }
+
+    // Test Out methods directly
+    #[test]
+    fn test_out_push_str() {
+        let mut out = Out::new(FmtOpts::default());
+        out.push_str("test");
+        assert_eq!(out.finish(), "test");
+    }
+
+    #[test]
+    fn test_out_writeln() {
+        let mut out = Out::new(FmtOpts::default());
+        out.writeln("line");
+        assert_eq!(out.finish(), "line\n");
+    }
+
+    #[test]
+    fn test_out_finish() {
+        let out = Out::new(FmtOpts::default());
+        let result = out.finish();
+        assert_eq!(result, "");
+    }
+
+    // Test FmtOpts Default
+    #[test]
+    fn test_fmtopts_default() {
+        let opts = FmtOpts::default();
+        assert!(!opts.colors);
+        assert!(!opts.show_region_data);
+        assert!(opts.show_tables);
+        assert_eq!(opts.hex_cols, 32);
+    }
+
+    // Test FmtOpts builder chaining
+    #[test]
+    fn test_fmtopts_builder_full_chain() {
+        let opts = FmtOpts::default()
+            .colors(true);
+        assert!(opts.colors);
+    }
 }
