@@ -1058,4 +1058,96 @@ mod tests {
         assert_eq!(result.status, Status::Fail);
         assert!(result.error.as_ref().is_some_and(|e| e.contains("trap")));
     }
+
+    // ---------------------------------------------------------------------------
+    // Missing opcode variant tests
+    // ---------------------------------------------------------------------------
+
+    // NOTE: CALL instruction is tested via the runtime integration tests.
+    // E3's binary format parser distributes instructions evenly across functions,
+    // which doesn't properly support multi-function modules with proper code offsets.
+
+    #[test]
+    fn test_e3_load_store_i32() {
+        // Pattern from existing test_e3_store_load_i64
+        let bytes = build_e3(&[
+            Instruction::KImm { dst: 0, value: 12345 },
+            Instruction::StoreI32 { addr: 0, src: 0 },
+            Instruction::LoadI32 { dst: 0, addr: 0 },
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(12345));
+    }
+
+    #[test]
+    fn test_e3_load_store_u64() {
+        // U64 stores and loads
+        let bytes = build_e3(&[
+            Instruction::KImm { dst: 0, value: 999999 },
+            Instruction::StoreU64 { addr: 0, src: 0 },
+            Instruction::LoadU64 { dst: 0, addr: 0 },
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(999999));
+    }
+
+    #[test]
+    fn test_e3_load_store_u32() {
+        // U32 stores and loads
+        let bytes = build_e3(&[
+            Instruction::KImm { dst: 0, value: 54321 },
+            Instruction::StoreU32 { addr: 0, src: 0 },
+            Instruction::LoadU32 { dst: 0, addr: 0 },
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(54321));
+    }
+
+    // NOTE: Negative i32 values cannot be encoded via KImm (ULEB encoding is unsigned).
+    // Use arithmetic to create negative values (e.g., 0 - value).
+
+    #[test]
+    fn test_e3_load_u32_zero_extend() {
+        // Load a value > i32 max and verify it's zero-extended
+        let bytes = build_e3(&[
+            Instruction::KImm { dst: 0, value: 0x80000000i64 }, // 2^31 = 2147483648
+            Instruction::StoreU32 { addr: 0, src: 0 },
+            Instruction::LoadU32 { dst: 0, addr: 0 },
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(0x80000000i64)); // zero-extended to i64
+    }
+
+    #[test]
+    fn test_e3_load_store_oob() {
+        // Test out-of-bounds load
+        let bytes = build_e3(&[
+            Instruction::LoadI32 { dst: 0, addr: 4093 }, // 4093 + 4 = 4097 > 4096 = OOB
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().is_some_and(|e| e.contains("OOB")));
+    }
+
+    #[test]
+    fn test_e3_store_oob() {
+        // Test out-of-bounds store
+        let bytes = build_e3(&[
+            Instruction::KImm { dst: 0, value: 42 },
+            Instruction::StoreI64 { addr: 4090, src: 0 }, // 4090 + 8 = 4098 = OOB
+            Instruction::Ret,
+        ]);
+        let result = run(&bytes);
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().is_some_and(|e| e.contains("OOB")));
+    }
 }

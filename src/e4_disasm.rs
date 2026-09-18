@@ -788,4 +788,127 @@ mod tests {
         assert!(text.contains("imul"), "missing imul");
         assert!(text.contains("idiv"), "missing idiv");
     }
+
+    // -------------------------------------------------------------------------
+    // T31: F64 binary/div, F64 unary, F64 conversions
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_disasm_f64_binary_div() {
+        // FSubF64 and FDivF64 — not covered by test_disasm_f64_instructions
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::FImmF64 { dst: 0, imm: 10.0 },
+                    Instruction::FImmF64 { dst: 1, imm: 2.0 },
+                    Instruction::FSubF64 { dst: 2, a: 0, b: 1 },
+                    Instruction::FDivF64 { dst: 3, a: 0, b: 1 },
+                    Instruction::Ret { dst: 3 },
+                ],
+            }],
+            memory: vec![],
+            tables: vec![],
+        };
+        let text = fmt_module_opts(&module, FmtOpts::default());
+        assert!(text.contains("fsub.f64"), "missing fsub.f64");
+        assert!(text.contains("fdiv.f64"), "missing fdiv.f64");
+    }
+
+    #[test]
+    fn test_disasm_f64_unary_and_conversions() {
+        // FNegF64, FAbsF64, FRoundF64, U2F64, F642U — never tested
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::FImmF64 { dst: 0, imm: -3.14 },
+                    Instruction::FNegF64 { dst: 1, a: 0 },
+                    Instruction::FAbsF64 { dst: 2, a: 0 },
+                    Instruction::FRoundF64 { dst: 3, a: 0 },
+                    Instruction::I2F64 { dst: 4, a: 0 },
+                    Instruction::U2F64 { dst: 5, a: 0 },
+                    Instruction::F642I { dst: 6, a: 0 },
+                    Instruction::F642U { dst: 7, a: 0 },
+                    Instruction::Ret { dst: 7 },
+                ],
+            }],
+            memory: vec![],
+            tables: vec![],
+        };
+        let text = fmt_module_opts(&module, FmtOpts::default());
+        assert!(text.contains("fneg.f64"), "missing fneg.f64");
+        assert!(text.contains("fabs.f64"), "missing fabs.f64");
+        assert!(text.contains("fround.f64"), "missing fround.f64");
+        assert!(text.contains("u2f64"), "missing u2f64");
+        assert!(text.contains("f64u"), "missing f64u");
+    }
+
+    // -------------------------------------------------------------------------
+    // T32: HostCall output branches
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_disasm_hostcall_variants() {
+        // Test empty args, empty results, multiple args/results
+        // fmt_instruction HostCall: args.is_empty(), results.is_empty(), multi-item formatting
+
+        // Variant: empty args, non-empty results
+        let m1 = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 4,
+                code: vec![
+                    Instruction::HostCall { id: 5, args: vec![], results: vec![2] },
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![],
+            tables: vec![],
+        };
+        let t1 = fmt_module_opts(&m1, FmtOpts::default());
+        assert!(t1.contains("host.call"), "missing host.call");
+        assert!(t1.contains("id=5"), "missing id=5");
+
+        // Variant: non-empty args, empty results
+        let m2 = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![
+                    Instruction::HostCall { id: 3, args: vec![0, 1], results: vec![] },
+                    Instruction::Trap,
+                ],
+            }],
+            memory: vec![],
+            tables: vec![],
+        };
+        let t2 = fmt_module_opts(&m2, FmtOpts::default());
+        assert!(t2.contains("host.call"), "missing host.call");
+        assert!(t2.contains("id=3"), "missing id=3");
+
+        // Variant: multiple args AND results
+        let m3 = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::HostCall { id: 7, args: vec![0, 1, 2], results: vec![3, 4] },
+                    Instruction::Ret { dst: 3 },
+                ],
+            }],
+            memory: vec![],
+            tables: vec![],
+        };
+        let t3 = fmt_module_opts(&m3, FmtOpts::default());
+        assert!(t3.contains("host.call"), "missing host.call");
+        assert!(t3.contains("id=7"), "missing id=7");
+    }
 }
