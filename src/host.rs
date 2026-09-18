@@ -100,6 +100,35 @@ mod tests {
         hf.register(|_| E4Value::I32(0));
         assert_eq!(hf.len(), 3);
     }
+
+    #[test]
+    fn test_host_functions_default() {
+        let hf: HostFunctions = Default::default();
+        assert!(hf.is_empty());
+        assert_eq!(hf.len(), 0);
+    }
+
+    #[test]
+    fn test_host_functions_call_with_args() {
+        let mut hf = HostFunctions::new();
+        hf.register(|_args| {
+            E4Value::I32(42)
+        });
+
+        let result = hf.call(0, &[E4Value::I32(5)]).unwrap();
+        assert_eq!(result.as_i32().unwrap(), 42);
+    }
+
+    #[test]
+    fn test_host_functions_call_with_multiple_args() {
+        let mut hf = HostFunctions::new();
+        hf.register(|_args| {
+            E4Value::I32(100)
+        });
+
+        let result = hf.call(0, &[E4Value::I32(10), E4Value::I32(20)]).unwrap();
+        assert_eq!(result.as_i32().unwrap(), 100);
+    }
 }
 
 /// A host function that can be called from E4 execution.

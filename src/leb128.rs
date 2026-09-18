@@ -85,13 +85,19 @@ pub fn decode_sleb(bytes: &[u8]) -> DecodeResult<i64> {
             // Final byte: sign-extend if bit6=1
             if (byte & 0x40) != 0 {
                 // Sign-extend: set bits [shift+7..63] to 1.
-                // For shift 0..8: (!0u64).wrapping_shl(shift+7) gives correct mask.
-                // For shift >= 9: wrapping_shl wraps, so set sign bit directly.
-                if shift >= 9 {
-                    result |= i64::MIN; // 0x8000000000000000 — set bit 63
+                // The mask is !0u64 << (shift + 7), but wrapping_shl has edge cases.
+                // For 2-byte (shift=7): mask = !0u64 << 14  → correct.
+                // For 3-byte (shift=14): mask = !0u64 << 21  → correct.
+                // wrapping_shl handles wrap-around, but for shift values where
+                // shift >= 64, the result is 0. We need to handle this:
+                // For bytes >= 10 (shift >= 63): wrapping_shl(1, >=64) = 0.
+                // In those cases, set all bits via i64::MIN directly.
+                let mask = if shift + 7 >= 64 {
+                    u64::MAX
                 } else {
-                    result |= (!0u64).wrapping_shl(shift + 7) as i64;
-                }
+                    (!0u64).wrapping_shl(shift + 7)
+                };
+                result = (result as u64 | !mask) as i64;
             }
             return Ok((result, index + 1));
         }
@@ -267,5 +273,65 @@ mod tests {
             let encoded = encode_sleb(value);
             assert!(encoded.len() >= 2, "SLEB value {value} should encode to 2+ bytes, got {} bytes", encoded.len());
         }
+    }
+
+    #[test]
+    fn decode_uleb_overflow() {
+        // Test overflow detection: shift + 7 > usize::BITS
+        // On 64-bit: usize::BITS = 64, so shift >= 58 causes overflow
+        // Need 9 continuation bytes (8 full iterations) then one more byte
+        // that would push shift to >= 58
+        // Shift progression: 7, 14, 21, 28, 35, 42, 49, 56, 63
+        // At 9th iteration, shift=63, shift+7=70 > 64, overflow detected
+        let overflow_bytes: Vec<u8> = vec![0x80; 10]; // 10 continuation bytes
+        let result = decode_uleb(&overflow_bytes);
+        assert!(result.is_err(), "ULEB with too many bytes should error");
+    }
+
+    #[test]
+    fn decode_sleb_high_shift_sign_extension() {
+        // Test sign extension with shift >= 9
+        // Large negative values require high shift for sign extension
+        // i64::MIN = -9223372036854775808 requires proper sign extension
+        let values = [
+            i64::MIN,
+            i64::MIN + 1,
+            i64::MIN / 2,
+            -1 << 10,  // -1024, requires shift >= 10
+            -1 << 14,  // -16384, requires shift >= 14
+        ];
+        for value in values {
+            let encoded = encode_sleb(value);
+            let (decoded, _) = decode_sleb(&encoded).expect("should decode successfully");
+            assert_eq!(decoded, value, "SLEB high-shift sign extension failed for {value}");
+        }
+    }
+
+    #[test]
+    fn decode_sleb_zero_bytes() {
+        // Empty input should produce truncated error
+        let result = decode_sleb(&[]);
+        assert!(result.is_err(), "Empty SLEB should error");
+    }
+
+    #[test]
+    fn encode_uleb_zero() {
+        let encoded = encode_uleb(0);
+        assert_eq!(encoded, &[0x00]);
+    }
+
+    #[test]
+    fn encode_sleb_zero() {
+        let encoded = encode_sleb(0);
+        assert_eq!(encoded, &[0x00]);
+    }
+
+    #[test]
+    fn encode_sleb_max_i64() {
+        // i64::MAX encodes to multiple bytes
+        let encoded = encode_sleb(i64::MAX);
+        assert!(encoded.len() >= 2, "i64::MAX should need multiple bytes");
+        let (decoded, _) = decode_sleb(&encoded).unwrap();
+        assert_eq!(decoded, i64::MAX);
     }
 }

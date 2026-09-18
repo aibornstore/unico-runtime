@@ -547,4 +547,519 @@ mod tests {
         assert_eq!(result.status, Status::Pass);
         assert_eq!(result.value, Some(99));
     }
+
+    // ---- Parse error tests ----
+    #[test]
+    fn test_parse_invalid_magic() {
+        let bytes = b"NICO\x00\x00".to_vec();
+        let r = Module::parse(&bytes);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid E1 magic"));
+    }
+
+    #[test]
+    fn test_parse_short_magic() {
+        let bytes = b"UNIC".to_vec();
+        let r = Module::parse(&bytes);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid E1 magic"));
+    }
+
+    #[test]
+    fn test_parse_missing_func_section() {
+        // Magic is correct but no FUNC section follows
+        let bytes = vec![
+            b'U', b'N', b'I', b'C', b'O', 0xe1, // Magic
+            0x03, 0x00, // CODE tag with len=0
+            0x00, // END
+        ];
+        let r = Module::parse(&bytes);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Missing FUNC section"));
+    }
+
+    #[test]
+    fn test_parse_missing_code_section() {
+        // Build bytes where after FUNC we go straight to END (no CODE)
+        let module_bytes = vec![
+            b'U', b'N', b'I', b'C', b'O', 0xe1, // Magic
+            0x02, // FUNC tag
+            0x06, // FUNC payload len = 6 bytes
+            0x01, // 1 function
+            0x00, // param_count=0
+            0x01, // result_count=1
+            0x01, // register_count=1
+            0x00, // code_offset=0
+            0x01, // code_size=1
+            // No CODE section - goes to END
+            0x00, // END
+        ];
+        let r = Module::parse(&module_bytes);
+        assert!(r.is_err());
+        // Parser expects CODE section after FUNC but finds END
+        assert!(r.unwrap_err().to_string().contains("Missing CODE section"));
+    }
+
+    #[test]
+    fn test_parse_func_section_mismatch() {
+        // Build with wrong FUNC payload size
+        let mut module_bytes = vec![
+            b'U', b'N', b'I', b'C', b'O', 0xe1, // Magic
+            0x02, // FUNC tag
+            0x03, // FUNC payload len = 3 (WRONG - should be 6)
+            0x01, // 1 function
+            0x00, // param_count=0
+            0x01, // result_count=1
+            0x01, // register_count=1
+            0x00, // code_offset=0
+            0x01, // code_size=1
+            0x03, // CODE tag
+            0x01, // CODE len
+            0x00, // TRAP opcode
+            0x00, // END
+        ];
+        let r = Module::parse(&module_bytes);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("FUNC section size mismatch"));
+    }
+
+    #[test]
+    fn test_parse_code_out_of_bounds() {
+        // Build with code_offset pointing past the end of code section
+        // The code section is only 1 byte, but offset is 5
+        let module_bytes = vec![
+            b'U', b'N', b'I', b'C', b'O', 0xe1, // Magic
+            0x02, // FUNC tag
+            0x06, // FUNC payload len = 6
+            0x01, // 1 function
+            0x00, // param_count=0
+            0x01, // result_count=1
+            0x01, // register_count=1
+            0x05, // code_offset=5 (past end of 1-byte code)
+            0x01, // code_size=1
+            0x03, // CODE tag
+            0x01, // CODE len = 1
+            0x00, // TRAP opcode (1 byte)
+            0x00, // END
+        ];
+        let r = Module::parse(&module_bytes);
+        assert!(r.is_err());
+        // The error should mention function index or out of bounds
+        let err = r.unwrap_err().to_string();
+        assert!(err.contains("out of bounds") || err.contains("Function"));
+    }
+
+    #[test]
+    fn test_parse_missing_end() {
+        // Build E1 without END marker
+        let f0 = vec![
+            0x0b, 0x00, 0x01, // K.I64 r0=1
+            0xa6, 0x01, 0x00, // RET r0
+        ];
+        let mut module_bytes = build_e1(vec![(f0, 0, 1)]);
+        // Remove the END byte
+        module_bytes.pop();
+        let r = Module::parse(&module_bytes);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Missing END section"));
+    }
+
+    #[test]
+    fn test_parse_unknown_opcode() {
+        // Create a module with an unknown opcode in the code
+        // Use low-level byte construction to avoid format issues
+        let mut module_bytes = vec![
+            b'U', b'N', b'I', b'C', b'O', 0xe1, // Magic
+            0x02, // FUNC tag
+            0x06, // FUNC payload len
+            0x01, // 1 function
+            0x00, // param_count=0
+            0x01, // result_count=1
+            0x01, // register_count=1
+            0x00, // code_offset=0
+            0x01, // code_size=1
+            0x03, // CODE tag
+            0x01, // CODE len
+            0xFF, // Unknown opcode 0xFF
+            0x00, // END
+        ];
+        let r = Module::parse(&module_bytes);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Unknown E1 opcode"));
+    }
+
+    // ---- Verify error tests ----
+    #[test]
+    fn test_verify_empty_functions() {
+        let module = Module {
+            profile: Profile::E1,
+            functions: vec![],
+        };
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("No functions"));
+    }
+
+    #[test]
+    fn test_verify_entry_has_params() {
+        let module = Module {
+            profile: Profile::E1,
+            functions: vec![Function {
+                param_count: 1, // Non-zero params
+                result_count: 1,
+                register_count: 2,
+                code_offset: 0,
+                code_size: 0,
+                instructions: vec![Instruction::Trap],
+            }],
+        };
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Entry must have 0 params"));
+    }
+
+    #[test]
+    fn test_verify_wrong_result_count() {
+        let module = Module {
+            profile: Profile::E1,
+            functions: vec![Function {
+                param_count: 0,
+                result_count: 0, // Must be 1
+                register_count: 1,
+                code_offset: 0,
+                code_size: 0,
+                instructions: vec![Instruction::Trap],
+            }],
+        };
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("must have exactly 1 result"));
+    }
+
+    #[test]
+    fn test_verify_registers_less_than_params() {
+        let module = Module {
+            profile: Profile::E1,
+            functions: vec![Function {
+                param_count: 3,
+                result_count: 1,
+                register_count: 2, // Less than param_count
+                code_offset: 0,
+                code_size: 0,
+                instructions: vec![Instruction::Trap],
+            }],
+        };
+        let r = module.verify();
+        assert!(r.is_err());
+        // Check for error about register count
+        let err = r.unwrap_err().to_string();
+        assert!(err.contains("registers") || err.contains("params"));
+    }
+
+    #[test]
+    fn test_verify_empty_body() {
+        let module = Module {
+            profile: Profile::E1,
+            functions: vec![Function {
+                param_count: 0,
+                result_count: 1,
+                register_count: 1,
+                code_offset: 0,
+                code_size: 0,
+                instructions: vec![], // Empty body
+            }],
+        };
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("empty body"));
+    }
+
+    #[test]
+    fn test_verify_ends_with_trap() {
+        let module = Module {
+            profile: Profile::E1,
+            functions: vec![Function {
+                param_count: 0,
+                result_count: 1,
+                register_count: 1,
+                code_offset: 0,
+                code_size: 0,
+                instructions: vec![
+                    Instruction::KImm { dst: 0, imm: 42 },
+                    Instruction::KImm { dst: 0, imm: 0 }, // Not ending with RET or TRAP
+                ],
+            }],
+        };
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("must end with RET or TRAP"));
+    }
+
+    // ---- Execute error tests ----
+    #[test]
+    fn test_execute_empty_module() {
+        let module = Module {
+            profile: Profile::E1,
+            functions: vec![],
+        };
+        let mut exec = E1Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("No functions"));
+    }
+
+    #[test]
+    fn test_execute_entry_has_params() {
+        let module = Module {
+            profile: Profile::E1,
+            functions: vec![Function {
+                param_count: 1,
+                result_count: 1,
+                register_count: 2,
+                code_offset: 0,
+                code_size: 0,
+                instructions: vec![Instruction::Trap],
+            }],
+        };
+        let mut exec = E1Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Entry function must have 0 parameters"));
+    }
+
+    #[test]
+    fn test_execute_fell_off_end() {
+        // Module with no terminating instruction
+        let f0 = vec![
+            0x0b, 0x00, 0x01, // K.I64 r0=1 (no RET or TRAP)
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        let mut exec = E1Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("fell off end"));
+    }
+
+    #[test]
+    fn test_execute_invalid_callee() {
+        // f0: CALL f99 (invalid callee), should fail
+        let f0 = vec![
+            0x8f, 0x63, 0x00, 0x00, 0x01, 0x00, // CALL callee=99 (doesn't exist)
+            0xa6, 0x01, 0x00,       // RET r0 (never reached)
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        let mut exec = E1Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("invalid callee"));
+    }
+
+    #[test]
+    fn test_execute_argc_mismatch() {
+        // f0 calls f1 with wrong argc
+        // f0: CALL f1 with argc=2 but f1 expects 1 param
+        let f0 = vec![
+            0x0b, 0x00, 0x05,       // K.I64 r0=5
+            0x8f, 0x01, 0x02, 0x00, 0x00, 0x01, 0x01, // CALL callee=1, argc=2 (wrong!)
+            0xa6, 0x01, 0x01,       // RET r1 (never reached)
+        ];
+        let f1 = vec![
+            0xa6, 0x01, 0x00,       // RET r0 (expects 1 param)
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 2), (f1, 1, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        let mut exec = E1Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("argc"));
+    }
+
+    #[test]
+    fn test_execute_cmp_invalid_pred() {
+        // f0: CMP with pred=99 (invalid)
+        let f0 = vec![
+            0x0b, 0x00, 0x05,       // K.I64 r0=5
+            0x0b, 0x01, 0x0a,       // K.I64 r1=10
+            0x8c, 0x63, 0x02, 0x00, 0x01, // CMP pred=99 (invalid) dst=r2 lhs=r0 rhs=r1
+            0xa6, 0x01, 0x02,       // RET r2 (never reached)
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        let mut exec = E1Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("invalid CMP pred"));
+    }
+
+    #[test]
+    fn test_execute_trap() {
+        let f0 = vec![
+            0x00,                   // TRAP
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        let mut exec = E1Executor::new();
+        let result = exec.execute(&module).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.unwrap().contains("Explicit TRAP"));
+    }
+
+    #[test]
+    fn test_execute_add() {
+        // f0: K r0=5, K r1=10, ADD r2=r0+r1, RET r2
+        let f0 = vec![
+            0x0b, 0x00, 0x05,       // K.I64 r0=5
+            0x0b, 0x01, 0x0a,       // K.I64 r1=10
+            0x13, 0x02, 0x00, 0x01, // ADD r2 r0 r1
+            0xa6, 0x01, 0x02,       // RET r2
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+        
+        let mut exec = E1Executor::new();
+        let result = exec.execute(&module).unwrap();
+        
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(15)); // 5 + 10
+    }
+
+    #[test]
+    fn test_execute_add_overflow() {
+        // f0: K r0=63 (max single-byte positive SLEB), K r1=1, ADD r2=r0+r1, RET r2
+        // 63 + 1 = 64 (wraps to -64 in signed arithmetic)
+        let f0 = vec![
+            0x0b, 0x00, 0x3f,       // K.I64 r0=63 (0x3f is max positive single-byte SLEB)
+            0x0b, 0x01, 0x01,       // K.I64 r1=1
+            0x13, 0x02, 0x00, 0x01, // ADD r2 r0 r1
+            0xa6, 0x01, 0x02,       // RET r2
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        
+        let mut exec = E1Executor::new();
+        let result = exec.execute(&module).unwrap();
+        
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(64)); // 63 + 1 = 64
+    }
+
+    #[test]
+    fn test_execute_cmp_neq() {
+        // f0: K r0=5, K r1=10, CMP EQ r2 r0 r1, RET r2
+        // Expected: r2=0 (5 != 10)
+        let f0 = vec![
+            0x0b, 0x00, 0x05,       // K.I64 r0=5
+            0x0b, 0x01, 0x0a,       // K.I64 r1=10
+            0x8c, 0x00, 0x02, 0x00, 0x01, // CMP.I64 pred=0(EQ) dst=r2 lhs=r0 rhs=r1
+            0xa6, 0x01, 0x02,       // RET r2
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+        
+        let mut exec = E1Executor::new();
+        let result = exec.execute(&module).unwrap();
+        
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(0)); // 5 != 10
+    }
+
+    #[test]
+    fn test_execute_cmp_not_less() {
+        // f0: K r0=10, K r1=5, CMP LT.S r2 r0 r1, RET r2
+        // Expected: r2=0 (10 >= 5)
+        let f0 = vec![
+            0x0b, 0x00, 0x0a,       // K.I64 r0=10
+            0x0b, 0x01, 0x05,       // K.I64 r1=5
+            0x8c, 0x01, 0x02, 0x00, 0x01, // CMP.I64 pred=1(LT.S) dst=r2 lhs=r0 rhs=r1
+            0xa6, 0x01, 0x02,       // RET r2
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+        
+        let mut exec = E1Executor::new();
+        let result = exec.execute(&module).unwrap();
+        
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(0)); // 10 >= 5
+    }
+
+    #[test]
+    fn test_execute_br_if_not_taken() {
+        // f0: K r0=0, K r1=0, CMP EQ r2 r0 r1 (true), BR.IF skip, K r0=99, skip: RET r0
+        // BR.IF taken because cond=1, so K r0=99 is SKIPPED
+        let f0 = vec![
+            0x0b, 0x00, 0x00,       // K.I64 r0=0
+            0x0b, 0x01, 0x00,       // K.I64 r1=0
+            0x8c, 0x00, 0x02, 0x00, 0x01, // CMP EQ r2 r0 r1 (r2=1, true)
+            0x8e, 0x02, 0x05,       // BR.IF r2 target=5 (taken, jump to RET)
+            0x0b, 0x00, 0x63,       // K.I64 r0=99 (SKIPPED)
+            0xa6, 0x01, 0x00,       // RET r0 (ordinal 5)
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        
+        let mut exec = E1Executor::new();
+        let result = exec.execute(&module).unwrap();
+        
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(0)); // r0 is 0, K r0=99 was skipped
+    }
+
+    #[test]
+    fn test_execute_br_if_taken_to_skip() {
+        // Test BR.IF where condition is false (not taken)
+        // f0: K r0=1, K r1=0, CMP EQ r2 r0 r1 (false), BR.IF skip, K r0=50, skip: RET r0
+        // Use 50 (single-byte SLEB128 = 0x32)
+        let f0 = vec![
+            0x0b, 0x00, 0x01,       // K.I64 r0=1
+            0x0b, 0x01, 0x00,       // K.I64 r1=0
+            0x8c, 0x00, 0x02, 0x00, 0x01, // CMP EQ r2 r0 r1 (r2=0, false)
+            0x8e, 0x02, 0x05,       // BR.IF r2 target=5 (NOT taken)
+            0x0b, 0x00, 0x32,         // K.I64 r0=50 (single-byte SLEB128)
+            0xa6, 0x01, 0x00,       // RET r0 (ordinal 5)
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        
+        let mut exec = E1Executor::new();
+        let result = exec.execute(&module).unwrap();
+        
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(50)); // r0 is 50, K r0=50 was executed
+    }
+
+    #[test]
+    fn test_execute_call_with_no_return_value_dest() {
+        // Test calling a function that doesn't store result
+        // f0: CALL f1 (no result register), but we still need to advance PC
+        // f1: K r0=42, RET r0
+        let f0 = vec![
+            0x8f, 0x01, 0x00, 0x01, 0x00, // CALL f1, argc=0, no args, result_count=1, result_reg=0
+            0xa6, 0x01, 0x00,       // RET r0 (returns whatever f1 returned)
+        ];
+        let f1 = vec![
+            0x0b, 0x00, 0x2a,       // K.I64 r0=42
+            0xa6, 0x01, 0x00,       // RET r0
+        ];
+        let module_bytes = build_e1(vec![(f0, 0, 1), (f1, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        
+        let mut exec = E1Executor::new();
+        let result = exec.execute(&module).unwrap();
+        
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(42));
+    }
+
+    #[test]
+    fn test_executor_default() {
+        let exec = E1Executor::default();
+        assert_eq!(exec.fuel, 100_000);
+        assert!(exec.frames.is_empty());
+    }
 }

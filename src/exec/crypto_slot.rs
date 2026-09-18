@@ -226,4 +226,120 @@ mod tests {
         let result = slot.decrypt(&[0u8; 8], None);
         assert!(result.is_err(), "AES256 decrypt with short data should fail");
     }
+
+    #[test]
+    fn test_crypto_slot_default_is_empty() {
+        let slot = CryptoSlot::default();
+        assert!(slot.is_empty());
+    }
+
+    #[test]
+    fn test_crypto_slot_poly1305_not_empty() {
+        let key = [0x42u8; 32];
+        let slot = CryptoSlot::Poly1305 { key };
+        assert!(!slot.is_empty());
+    }
+
+    #[test]
+    fn test_crypto_slot_aes256_not_empty() {
+        let round_keys = [0u8; 240];
+        let slot = CryptoSlot::Aes256 { round_keys };
+        assert!(!slot.is_empty());
+    }
+
+    #[test]
+    fn test_crypto_slot_debug_output() {
+        // Test Debug output doesn't panic and produces output
+        let _empty = format!("{:?}", CryptoSlot::Empty);
+        let _aes128 = format!("{:?}", CryptoSlot::Aes128 { round_keys: [0u8; 176] });
+        let _aes256 = format!("{:?}", CryptoSlot::Aes256 { round_keys: [0u8; 240] });
+        let _chacha = format!("{:?}", CryptoSlot::ChaCha20 { key: [0u8; 32] });
+        let _poly = format!("{:?}", CryptoSlot::Poly1305 { key: [0u8; 32] });
+    }
+
+    #[test]
+    fn test_crypto_slot_equality() {
+        let key1 = [0x42u8; 32];
+        let key2 = [0x43u8; 32];
+        let slot1 = CryptoSlot::ChaCha20 { key: key1 };
+        let slot2 = CryptoSlot::ChaCha20 { key: key1 };
+        let slot3 = CryptoSlot::ChaCha20 { key: key2 };
+        assert_eq!(slot1, slot2);
+        assert_ne!(slot1, slot3);
+        assert_ne!(slot1, CryptoSlot::Empty);
+    }
+
+    #[test]
+    fn test_crypto_slot_clone() {
+        let key = [0x42u8; 32];
+        let slot = CryptoSlot::ChaCha20 { key };
+        let cloned = slot.clone();
+        assert_eq!(slot, cloned);
+    }
+
+    #[test]
+    fn test_crypto_slot_chacha20_nonzero() {
+        // Test ChaCha20 with non-zero key
+        let key = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                   0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+                   0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
+                   0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20];
+        let slot = CryptoSlot::ChaCha20 { key };
+        let nonce: [u8; 12] = [0u8; 12];
+        let plaintext = b"Test message with non-zero key";
+        let ct = slot.encrypt(plaintext, Some(&nonce)).unwrap();
+        let pt = slot.decrypt(&ct, Some(&nonce)).unwrap();
+        assert_eq!(&pt[..], plaintext);
+    }
+
+    #[test]
+    fn test_crypto_slot_poly1305_mac() {
+        // Test Poly1305 MAC production
+        let key = [0x42u8; 32];
+        let slot = CryptoSlot::Poly1305 { key };
+        let result = slot.encrypt(b"", None).unwrap();
+        assert_eq!(result.len(), 16);
+
+        let result = slot.encrypt(b"a", None).unwrap();
+        assert_eq!(result.len(), 16);
+
+        let result = slot.encrypt(b"Hello Poly1305!", None).unwrap();
+        assert_eq!(result.len(), 16);
+    }
+
+    #[test]
+    fn test_crypto_slot_empty_errors() {
+        let slot = CryptoSlot::Empty;
+        // Encrypt with non-empty data
+        let result = slot.encrypt(b"test", None);
+        assert!(result.is_err());
+        let result = slot.decrypt(b"test", None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_crypto_slot_aes128_encrypt_decrypt() {
+        // Test AES128 with valid 16-byte key schedule (all zeros is valid)
+        let round_keys = [0u8; 176];
+        let slot = CryptoSlot::Aes128 { round_keys };
+        let plaintext = [0u8; 16];
+        let ct = slot.encrypt(&plaintext, None).unwrap();
+        assert_eq!(ct.len(), 16);
+
+        let pt = slot.decrypt(&ct, None).unwrap();
+        assert_eq!(pt.len(), 16);
+    }
+
+    #[test]
+    fn test_crypto_slot_aes256_encrypt_decrypt() {
+        // Test AES256 with valid 16-byte key schedule (all zeros is valid)
+        let round_keys = [0u8; 240];
+        let slot = CryptoSlot::Aes256 { round_keys };
+        let plaintext = [0u8; 16];
+        let ct = slot.encrypt(&plaintext, None).unwrap();
+        assert_eq!(ct.len(), 16);
+
+        let pt = slot.decrypt(&ct, None).unwrap();
+        assert_eq!(pt.len(), 16);
+    }
 }

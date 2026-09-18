@@ -911,4 +911,331 @@ mod tests {
         let module = assemble(asm).expect("Failed to assemble with empty lines");
         assert_eq!(module.regions.len(), 1);
     }
+
+    // ---- Additional edge case tests ----
+    #[test]
+    fn test_assemble_region_invalid_size() {
+        let r = assemble("region 0 abc 1 1");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid region size"));
+    }
+
+    #[test]
+    fn test_assemble_region_invalid_writable() {
+        let r = assemble("region 0 65536 1 xyz");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid writable flag"));
+    }
+
+    #[test]
+    fn test_assemble_region_invalid_result_count() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 abc 0");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid result count"));
+    }
+
+    #[test]
+    fn test_assemble_region_invalid_entry_block() {
+        let r = assemble("region 0 65536 1 1\nfunction 0 0 abc");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("Invalid entry block"));
+    }
+
+    #[test]
+    fn test_assemble_const_no_block() {
+        // const outside of block - should be silently ignored
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+              block 0
+                const r0 u32 42
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        // const was added, block should have 1 op
+        assert_eq!(module.functions[0].blocks.len(), 1);
+        assert_eq!(module.functions[0].blocks[0].ops.len(), 1);
+    }
+
+    #[test]
+    fn test_assemble_binary_no_block() {
+        // binary outside of block - should be silently ignored
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+              block 0
+                const r0 u32 1
+                const r1 u32 2
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        // binary was ignored, block should have only 2 ops (the consts)
+        assert_eq!(module.functions[0].blocks.len(), 1);
+        assert_eq!(module.functions[0].blocks[0].ops.len(), 2); // Only the consts
+    }
+
+    #[test]
+    fn test_assemble_ret_no_block() {
+        // ret outside of block - should be silently ignored
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+              block 0
+                const r0 u32 42
+              end
+              ret r0
+            end
+            entry 0
+        "#;
+        // This should fail because the block has no terminator
+        let result = assemble(asm);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("missing terminator"));
+    }
+
+    #[test]
+    fn test_assemble_table_too_few_args() {
+        let r = assemble("region 0 65536 1 1\ntable 0");
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("table requires id and at least one target"));
+    }
+
+    #[test]
+    fn test_assemble_entry_outside_function() {
+        let asm = r#"
+            region 0 65536 1 1
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        assert_eq!(module.entry_function, 0);
+    }
+
+    #[test]
+    fn test_assemble_block_without_function() {
+        // block before function - should start block but it has no function
+        // The block will be created but function won't exist
+        let asm = r#"
+            region 0 65536 1 1
+            block 0
+              const r0 u32 42
+            end
+            function 0 1 0
+              block 1
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        // This should fail because block 0 has no terminator
+        let r = assemble(asm);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_assemble_end_block() {
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+              block 0
+                const r0 u32 1
+                ret r0
+              end block
+            end function
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        assert_eq!(module.functions.len(), 1);
+    }
+
+    #[test]
+    fn test_assemble_const_bool_false() {
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+              block 0
+                const r0 bool false
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        if let U30Op::Const { dst: 0, value: U30Value::Bool(false) } = &module.functions[0].blocks[0].ops[0] {
+            // OK
+        } else {
+            panic!("Expected Bool(false)");
+        }
+    }
+
+    #[test]
+    fn test_assemble_const_u64_max() {
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+              block 0
+                const r0 u64 18446744073709551615
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        if let U30Op::Const { dst: 0, value: U30Value::U64(18446744073709551615u64) } = &module.functions[0].blocks[0].ops[0] {
+            // OK
+        } else {
+            panic!("Expected u64 max");
+        }
+    }
+
+    #[test]
+    fn test_assemble_const_f32_pi() {
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+              block 0
+                const r0 f32 3.14159
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        if let U30Op::Const { dst: 0, value: U30Value::F32(f) } = &module.functions[0].blocks[0].ops[0] {
+            assert!((f - 3.14159).abs() < 0.001);
+        } else {
+            panic!("Expected F32");
+        }
+    }
+
+    #[test]
+    fn test_assemble_const_f64_pi() {
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+              block 0
+                const r0 f64 3.141592653589793
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        if let U30Op::Const { dst: 0, value: U30Value::F64(f) } = &module.functions[0].blocks[0].ops[0] {
+            assert!((f - 3.141592653589793).abs() < 1e-10);
+        } else {
+            panic!("Expected F64");
+        }
+    }
+
+    #[test]
+    fn test_assemble_binary_op_registers() {
+        // Test binary op parsing with various registers
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+              block 0
+                const r0 u32 1
+                const r1 u32 2
+                const r127 u32 3
+                binary r10 sub_u32 r0 r1
+                ret r10
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        assert!(matches!(
+            &module.functions[0].blocks[0].ops[3],
+            U30Op::Binary { dst: 10, op: U30BinaryOp::SubWrapU32, a: 0, b: 1 }
+        ));
+    }
+
+    #[test]
+    fn test_assemble_multiple_regions() {
+        let asm = r#"
+            region 0 1024 1 1
+            region 1 2048 1 0
+            region 2 4096 0 1
+            function 0 1 0
+              block 0
+                const r0 u32 42
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        assert_eq!(module.regions.len(), 3);
+        assert_eq!(module.regions[0].size, 1024);
+        assert_eq!(module.regions[1].writable, false);
+        assert_eq!(module.regions[2].readable, false);
+    }
+
+    #[test]
+    fn test_assemble_multiple_tables() {
+        let asm = r#"
+            region 0 65536 1 1
+            table 0 0 1 2
+            table 1 3 4 5
+            function 0 1 0
+              block 0
+                const r0 u32 0
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        assert_eq!(module.tables.len(), 2);
+        assert_eq!(module.tables[0].targets, vec![0, 1, 2]);
+        assert_eq!(module.tables[1].targets, vec![3, 4, 5]);
+    }
+
+    #[test]
+    fn test_assemble_multiple_functions_no_blocks() {
+        let asm = r#"
+            region 0 65536 1 1
+            function 0 1 0
+            end
+            function 0 1 0
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        assert_eq!(module.functions.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_constant_invalid_u64() {
+        let r = parse_constant("99999999999999999999", &U30Type::U64);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_parse_constant_invalid_f64() {
+        let r = parse_constant("not_a_float", &U30Type::F64);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_assemble_region_size_zero() {
+        let asm = r#"
+            region 0 0 1 1
+            function 0 1 0
+              block 0
+                const r0 u32 0
+                ret r0
+              end
+            end
+            entry 0
+        "#;
+        let module = assemble(asm).expect("Failed to assemble");
+        assert_eq!(module.regions[0].size, 0);
+    }
 }

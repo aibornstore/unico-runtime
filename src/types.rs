@@ -169,6 +169,158 @@ mod tests {
     }
 
     #[test]
+    fn test_profile_magic_e1() {
+        let magic = Profile::E1.magic();
+        assert_eq!(magic, *b"UNICO\xe1");
+    }
+
+    #[test]
+    fn test_profile_magic_e2() {
+        let magic = Profile::E2.magic();
+        assert_eq!(magic, *b"UNICO\xe2");
+    }
+
+    #[test]
+    fn test_profile_magic_e3_pending() {
+        let magic = Profile::E3Pending.magic();
+        assert_eq!(magic, *b"UNICO\xe3");
+    }
+
+    #[test]
+    fn test_provenance_default() {
+        let p = Provenance::default();
+        assert_eq!(p.instructions, 0);
+        assert_eq!(p.fuel_remaining, 100_000);
+        assert_eq!(p.host_calls, 0);
+        assert_eq!(p.duration_us, 0);
+        assert!(p.deterministic);
+    }
+
+    #[test]
+    fn test_provenance_custom() {
+        let p = Provenance {
+            instructions: 1000,
+            fuel_remaining: 50000,
+            host_calls: 5,
+            duration_us: 12345,
+            deterministic: false,
+        };
+        assert_eq!(p.instructions, 1000);
+        assert_eq!(p.fuel_remaining, 50000);
+        assert_eq!(p.host_calls, 5);
+        assert_eq!(p.duration_us, 12345);
+        assert!(!p.deterministic);
+    }
+
+    #[test]
+    fn test_execution_result_debug() {
+        let provenance = Provenance::default();
+        let result = ExecutionResult::pass(42, provenance);
+        // Debug output should not panic
+        let _dbg = format!("{:?}", result);
+    }
+
+    #[test]
+    fn test_status_debug() {
+        // Test Status enum debug output
+        let _pass = format!("{:?}", Status::Pass);
+        let _fail = format!("{:?}", Status::Fail);
+    }
+
+    #[test]
+    fn test_profile_debug() {
+        // Test Profile enum debug output
+        let _e0 = format!("{:?}", Profile::E0);
+        let _e1 = format!("{:?}", Profile::E1);
+        let _e2 = format!("{:?}", Profile::E2);
+        let _e3 = format!("{:?}", Profile::E3Pending);
+    }
+
+    #[test]
+    fn test_register_value_debug() {
+        // Test RegisterValue enum debug output
+        let _i64 = format!("{:?}", RegisterValue::I64(42));
+        let _true = format!("{:?}", RegisterValue::Bool(true));
+        let _false = format!("{:?}", RegisterValue::Bool(false));
+    }
+
+    #[test]
+    fn test_execution_result_fail_with_memory() {
+        // Even on failure, memory should be None
+        let provenance = Provenance::default();
+        let result = ExecutionResult::fail("error".into(), provenance);
+        assert!(result.memory.is_none());
+    }
+
+    #[test]
+    fn test_provenance_debug() {
+        let p = Provenance::default();
+        let _ = format!("{:?}", p);
+    }
+
+    #[test]
+    fn test_execution_result_pass_memory_none() {
+        // When pass() is called, memory should be None
+        let provenance = Provenance::default();
+        let result = ExecutionResult::pass(100, provenance);
+        assert!(result.memory.is_none());
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn test_execution_result_fail_error_contains() {
+        let provenance = Provenance::default();
+        let result = ExecutionResult::fail("specific error message".into(), provenance);
+        assert!(result.error.is_some());
+        assert!(result.error.unwrap().contains("specific error"));
+    }
+
+    #[test]
+    fn test_execution_result_pass_with_memory_verifies() {
+        let provenance = Provenance::default();
+        let mem = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        let result = ExecutionResult::pass_with_memory(123, mem.clone(), provenance);
+        assert_eq!(result.memory, Some(mem));
+    }
+
+    #[test]
+    fn test_profile_family_name() {
+        // Test that all profile variants have expected family names
+        // via the magic() method
+        assert_eq!(Profile::E0.magic()[5], 0xE0);
+        assert_eq!(Profile::E1.magic()[5], 0xE1);
+        assert_eq!(Profile::E2.magic()[5], 0xE2);
+        assert_eq!(Profile::E3Pending.magic()[5], 0xE3);
+    }
+
+    #[test]
+    fn test_status_variants() {
+        // Test Status variants
+        assert!(matches!(Status::Pass, Status::Pass));
+        assert!(matches!(Status::Fail, Status::Fail));
+    }
+
+    #[test]
+    fn test_profile_partial_eq() {
+        assert_eq!(Profile::E0, Profile::E0);
+        assert_eq!(Profile::E1, Profile::E1);
+        assert_eq!(Profile::E2, Profile::E2);
+        assert_eq!(Profile::E3Pending, Profile::E3Pending);
+        assert_ne!(Profile::E0, Profile::E1);
+        assert_ne!(Profile::E1, Profile::E2);
+        assert_ne!(Profile::E2, Profile::E3Pending);
+    }
+
+    #[test]
+    fn test_register_value_clone() {
+        let rv1 = RegisterValue::I64(42);
+        let _rv2 = rv1.clone();
+
+        let rv3 = RegisterValue::Bool(true);
+        let _rv4 = rv3.clone();
+    }
+
+    #[test]
     fn test_execution_result_pass() {
         let provenance = Provenance::default();
         let result = ExecutionResult::pass(42, provenance.clone());

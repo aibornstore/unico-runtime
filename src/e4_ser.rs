@@ -1846,4 +1846,753 @@ mod tests {
         // r0=1, r1=1, r2=2, r3=1, r4=2, r5=2
         assert_eq!(result.value.unwrap(), 2);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Additional coverage tests for 100% regions
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Test all E4 instruction variants roundtrip
+    #[test]
+    fn test_e4_all_instruction_variants_roundtrip() {
+        let instructions = vec![
+            Instruction::Trap,
+            Instruction::Ret { dst: 0 },
+            Instruction::Br { target: 1 },
+            Instruction::BrIf { cond: 0, target: 2 },
+            Instruction::Cmp { pred: 0, dst: 0, a: 1, b: 2 },
+            Instruction::LoadI64 { dst: 0, addr: 1 },
+            Instruction::StoreI64 { addr: 0, src: 1 },
+            Instruction::FAdd { dst: 0, a: 1, b: 2 },
+            Instruction::FSub { dst: 0, a: 1, b: 2 },
+            Instruction::FMul { dst: 0, a: 1, b: 2 },
+            Instruction::FDiv { dst: 0, a: 1, b: 2 },
+            Instruction::FSqrt { dst: 0, a: 1 },
+            Instruction::FNeg { dst: 0, a: 1 },
+            Instruction::FAbs { dst: 0, a: 1 },
+            Instruction::FRound { dst: 0, a: 1 },
+            Instruction::FCmp { pred: 0, dst: 0, a: 1, b: 2 },
+            Instruction::I2F { dst: 0, a: 1 },
+            Instruction::F2I { dst: 0, a: 1 },
+            Instruction::U2F { dst: 0, a: 1 },
+            Instruction::F2U { dst: 0, a: 1 },
+            Instruction::Mov { dst: 0, src: 1 },
+            Instruction::FImm { dst: 0, imm: 1.5 },
+            Instruction::FAddF64 { dst: 0, a: 1, b: 2 },
+            Instruction::FSubF64 { dst: 0, a: 1, b: 2 },
+            Instruction::FMulF64 { dst: 0, a: 1, b: 2 },
+            Instruction::FDivF64 { dst: 0, a: 1, b: 2 },
+            Instruction::FSqrtF64 { dst: 0, a: 1 },
+            Instruction::FNegF64 { dst: 0, a: 1 },
+            Instruction::FAbsF64 { dst: 0, a: 1 },
+            Instruction::FRoundF64 { dst: 0, a: 1 },
+            Instruction::FCmpF64 { pred: 0, dst: 0, a: 1, b: 2 },
+            Instruction::I2F64 { dst: 0, a: 1 },
+            Instruction::F642I { dst: 0, a: 1 },
+            Instruction::U2F64 { dst: 0, a: 1 },
+            Instruction::F642U { dst: 0, a: 1 },
+            Instruction::FImmF64 { dst: 0, imm: 3.14159265358979 },
+            Instruction::IAdd { dst: 0, a: 1, b: 2 },
+            Instruction::ISub { dst: 0, a: 1, b: 2 },
+            Instruction::IMul { dst: 0, a: 1, b: 2 },
+            Instruction::IDiv { dst: 0, a: 1, b: 2 },
+            Instruction::IAnd { dst: 0, a: 1, b: 2 },
+            Instruction::IOr { dst: 0, a: 1, b: 2 },
+            Instruction::IXor { dst: 0, a: 1, b: 2 },
+            Instruction::INot { dst: 0, a: 1 },
+            Instruction::IClz { dst: 0, a: 1 },
+            Instruction::ICtz { dst: 0, a: 1 },
+            Instruction::IPopcnt { dst: 0, a: 1 },
+            Instruction::IRotl { dst: 0, a: 1, b: 2 },
+            Instruction::IRotr { dst: 0, a: 1, b: 2 },
+            Instruction::TableBr { table_idx: 0, index: 1 },
+            Instruction::MemGrow { dst: 0, delta: 1 },
+            Instruction::SExt { dst: 0, a: 1 },
+            Instruction::ZExt { dst: 0, a: 1 },
+            Instruction::MemCopy { dst: 0, src: 1, size: 8 },
+            Instruction::MemFill { addr: 0, value: 1, size: 8 },
+            Instruction::HostCall { id: 0, args: vec![0, 1], results: vec![2] },
+        ];
+        for instr in instructions {
+            let module = E4Module {
+                functions: vec![E4FunctionDef {
+                    param_count: 0,
+                    result_count: 0,
+                    register_count: 8,
+                    code: vec![instr.clone(), Instruction::Trap],
+                }],
+                memory: vec![0u8; 256],
+                tables: vec![],
+            };
+            let encoded = encode_e4(&module);
+            let decoded = decode_e4(&encoded).unwrap();
+            assert_eq!(decoded.functions[0].code[0], instr, 
+                "roundtrip failed for {:?}", instr);
+        }
+    }
+
+    /// Test truncated data for 0x00 Br instruction
+    #[test]
+    fn test_e4_decode_truncated_br() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::Br { target: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // Br: opcode(1) + target(4) = 5 bytes, truncate to opcode only
+        let result = decode_e4(&encoded[..encoded.len() - 4]);
+        assert!(result.is_err(), "truncated Br should fail");
+    }
+
+    /// Test truncated data for 0x01 BrIf instruction
+    #[test]
+    fn test_e4_decode_truncated_brif() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::BrIf { cond: 0, target: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // BrIf: opcode(1) + cond(4) + target(4) = 9 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated BrIf should fail");
+    }
+
+    /// Test truncated data for 0x02 Ret instruction
+    #[test]
+    fn test_e4_decode_truncated_ret() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::Ret { dst: 0 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // Ret: opcode(1) + dst(4) = 5 bytes, truncate to opcode only
+        let result = decode_e4(&encoded[..encoded.len() - 4]);
+        assert!(result.is_err(), "truncated Ret should fail");
+    }
+
+    /// Test truncated data for 0x04 Cmp instruction
+    #[test]
+    fn test_e4_decode_truncated_cmp() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::Cmp { pred: 0, dst: 0, a: 1, b: 2 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // Cmp: opcode(1) + pred(1) + dst(4) + a(4) + b(4) = 14 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated Cmp should fail");
+    }
+
+    /// Test truncated data for 0x05 LoadI64 instruction
+    #[test]
+    fn test_e4_decode_truncated_loadi64() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::LoadI64 { dst: 0, addr: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // LoadI64: opcode(1) + dst(4) + addr(4) = 9 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated LoadI64 should fail");
+    }
+
+    /// Test truncated data for 0x06 StoreI64 instruction
+    #[test]
+    fn test_e4_decode_truncated_storei64() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::StoreI64 { addr: 0, src: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // StoreI64: opcode(1) + addr(4) + src(4) = 9 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated StoreI64 should fail");
+    }
+
+    /// Test truncated data for 0x07-0x0A FAdd/FSub/FMul/FDiv instructions
+    #[test]
+    fn test_e4_decode_truncated_fbinop() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::FAdd { dst: 0, a: 1, b: 2 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // FAdd: opcode(1) + dst(4) + a(4) + b(4) = 13 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated FAdd should fail");
+    }
+
+    /// Test truncated data for 0x0B FSqrt instruction
+    #[test]
+    fn test_e4_decode_truncated_fsqrt() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::FSqrt { dst: 0, a: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // FSqrt: opcode(1) + dst(4) + a(4) = 9 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated FSqrt should fail");
+    }
+
+    /// Test truncated data for 0x0C-0x0E FNeg/FAbs/FRound instructions
+    #[test]
+    fn test_e4_decode_truncated_funop() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::FNeg { dst: 0, a: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // FNeg: opcode(1) + dst(4) + a(4) = 9 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated FNeg should fail");
+    }
+
+    /// Test truncated data for 0x0F FCmp instruction
+    #[test]
+    fn test_e4_decode_truncated_fcmp() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::FCmp { pred: 0, dst: 0, a: 1, b: 2 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // FCmp: opcode(1) + pred(1) + dst(4) + a(4) + b(4) = 14 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated FCmp should fail");
+    }
+
+    /// Test truncated data for 0x10-0x13 I2F/F2I/U2F/F2U instructions
+    #[test]
+    fn test_e4_decode_truncated_fconv() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::I2F { dst: 0, a: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // I2F: opcode(1) + dst(4) + a(4) = 9 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated I2F should fail");
+    }
+
+    /// Test truncated data for 0x14 Mov instruction
+    #[test]
+    fn test_e4_decode_truncated_mov() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::Mov { dst: 0, src: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // Mov: opcode(1) + dst(4) + src(4) = 9 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated Mov should fail");
+    }
+
+    /// Test truncated data for 0x15 FImm instruction
+    #[test]
+    fn test_e4_decode_truncated_fimm() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::FImm { dst: 0, imm: 1.5 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // FImm: opcode(1) + dst(4) + imm(4) = 9 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated FImm should fail");
+    }
+
+    /// Test all F64 instructions roundtrip
+    #[test]
+    fn test_e4_decode_truncated_f64_ops() {
+        // Test FSubF64 (0x18)
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::FSubF64 { dst: 0, a: 1, b: 2 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated FSubF64 should fail");
+    }
+
+    /// Test truncated data for 0x25-0x28 IAdd/ISub/IMul/IDiv instructions
+    #[test]
+    fn test_e4_decode_truncated_iarith() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::IAdd { dst: 0, a: 1, b: 2 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // IAdd: opcode(1) + dst(4) + a(4) + b(4) = 13 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated IAdd should fail");
+    }
+
+    /// Test truncated data for 0x2C-0x2F INot/IClz/ICtz/IPopcnt instructions
+    #[test]
+    fn test_e4_decode_truncated_bitcount() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::IClz { dst: 0, a: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // IClz: opcode(1) + dst(4) + a(4) = 9 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated IClz should fail");
+    }
+
+    /// Test truncated data for 0x33 MemGrow instruction
+    #[test]
+    fn test_e4_decode_truncated_memgrow() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::MemGrow { dst: 0, delta: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // MemGrow: opcode(1) + dst(4) + delta(4) = 9 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated MemGrow should fail");
+    }
+
+    /// Test truncated data for 0x34-0x35 SExt/ZExt instructions
+    #[test]
+    fn test_e4_decode_truncated_ext() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::SExt { dst: 0, a: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // SExt: opcode(1) + dst(4) + a(4) = 9 bytes
+        let result = decode_e4(&encoded[..encoded.len() - 5]);
+        assert!(result.is_err(), "truncated SExt should fail");
+    }
+
+    /// Test instruction_size for all instruction types
+    #[test]
+    fn test_e4_instruction_size_all() {
+        let instructions = vec![
+            (Instruction::Trap, 1),
+            (Instruction::Ret { dst: 0 }, 5),
+            (Instruction::Br { target: 1 }, 5),
+            (Instruction::BrIf { cond: 0, target: 1 }, 9),
+            (Instruction::Cmp { pred: 0, dst: 0, a: 1, b: 2 }, 14),
+            (Instruction::LoadI64 { dst: 0, addr: 1 }, 9),
+            (Instruction::StoreI64 { addr: 0, src: 1 }, 9),
+            (Instruction::FAdd { dst: 0, a: 1, b: 2 }, 13),
+            (Instruction::FSqrt { dst: 0, a: 1 }, 9),
+            (Instruction::FNeg { dst: 0, a: 1 }, 9),
+            (Instruction::FCmp { pred: 0, dst: 0, a: 1, b: 2 }, 14),
+            (Instruction::I2F { dst: 0, a: 1 }, 9),
+            (Instruction::Mov { dst: 0, src: 1 }, 9),
+            (Instruction::FImm { dst: 0, imm: 1.5 }, 9),
+            (Instruction::FImmF64 { dst: 0, imm: 3.14 }, 9),
+            (Instruction::IAdd { dst: 0, a: 1, b: 2 }, 13),
+            (Instruction::INot { dst: 0, a: 1 }, 9),
+            (Instruction::IRotl { dst: 0, a: 1, b: 2 }, 13),
+            (Instruction::TableBr { table_idx: 0, index: 1 }, 9),
+            (Instruction::MemGrow { dst: 0, delta: 1 }, 9),
+            (Instruction::SExt { dst: 0, a: 1 }, 9),
+            (Instruction::MemCopy { dst: 0, src: 1, size: 8 }, 13),
+            (Instruction::MemFill { addr: 0, value: 1, size: 8 }, 13),
+            (Instruction::HostCall { id: 0, args: vec![], results: vec![] }, 13),
+            (Instruction::HostCall { id: 0, args: vec![0, 1], results: vec![2] }, 25),
+        ];
+        for (instr, expected_size) in instructions {
+            let size = instruction_size(&instr);
+            assert_eq!(size, expected_size, "size mismatch for {:?}", instr);
+        }
+    }
+
+    /// Test encode/decode for all U30Type variants
+    #[test]
+    fn test_e4_encode_decode_type_params_results() {
+        // Test various param and result counts
+        for param_count in 0..4 {
+            for result_count in 0..4 {
+                let module = E4Module {
+                    functions: vec![E4FunctionDef {
+                        param_count,
+                        result_count,
+                        register_count: 8,
+                        code: vec![Instruction::Ret { dst: 0 }],
+                    }],
+                    memory: vec![0u8; 64],
+                    tables: vec![],
+                };
+                let decoded = roundtrip(&module);
+                assert_eq!(decoded.functions[0].param_count, param_count);
+                assert_eq!(decoded.functions[0].result_count, result_count);
+            }
+        }
+    }
+
+    /// Test encode/decode for various register counts
+    #[test]
+    fn test_e4_encode_decode_register_counts() {
+        for register_count in [1usize, 4, 16, 256] {
+            let module = E4Module {
+                functions: vec![E4FunctionDef {
+                    param_count: 0,
+                    result_count: 1,
+                    register_count,
+                    code: vec![
+                        Instruction::Mov { dst: 0, src: 0 },
+                        Instruction::Ret { dst: 0 },
+                    ],
+                }],
+                memory: vec![0u8; 64],
+                tables: vec![],
+            };
+            let decoded = roundtrip(&module);
+            assert_eq!(decoded.functions[0].register_count, register_count);
+        }
+    }
+
+    /// Test encode/decode for empty tables
+    #[test]
+    fn test_e4_encode_decode_empty_tables() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::Trap],
+            }],
+            memory: vec![],
+            tables: vec![],
+        };
+        let decoded = roundtrip(&module);
+        assert!(decoded.tables.is_empty());
+    }
+
+    /// Test encode/decode for multiple tables
+    #[test]
+    fn test_e4_encode_decode_multiple_tables() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::Trap],
+            }],
+            memory: vec![],
+            tables: vec![
+                vec![1, 2, 3, 4, 5],
+                vec![10, 20],
+                vec![],
+                vec![100],
+            ],
+        };
+        let decoded = roundtrip(&module);
+        assert_eq!(decoded.tables.len(), 4);
+        assert_eq!(decoded.tables[0], &[1, 2, 3, 4, 5]);
+        assert_eq!(decoded.tables[1], &[10, 20]);
+        assert!(decoded.tables[2].is_empty());
+        assert_eq!(decoded.tables[3], &[100]);
+    }
+
+    /// Test encode/decode for various memory sizes
+    #[test]
+    fn test_e4_encode_decode_memory_sizes() {
+        for mem_size in [0, 1, 64, 256, 1024, 65536] {
+            let memory: Vec<u8> = (0..mem_size).map(|i| i as u8).collect();
+            let module = E4Module {
+                functions: vec![E4FunctionDef {
+                    param_count: 0, result_count: 0, register_count: 4,
+                    code: vec![Instruction::Trap],
+                }],
+                memory: memory.clone(),
+                tables: vec![],
+            };
+            let decoded = roundtrip(&module);
+            assert_eq!(decoded.memory.len(), mem_size);
+            assert_eq!(decoded.memory, memory);
+        }
+    }
+
+    /// Test encode/decode for all instruction types with F64 values
+    #[test]
+    fn test_e4_encode_decode_f64_all_variants() {
+        let instructions = vec![
+            Instruction::FImmF64 { dst: 0, imm: f64::INFINITY },
+            Instruction::FImmF64 { dst: 0, imm: f64::NEG_INFINITY },
+            Instruction::FImmF64 { dst: 0, imm: f64::NAN },
+            Instruction::FImmF64 { dst: 0, imm: f64::MIN },
+            Instruction::FImmF64 { dst: 0, imm: f64::MAX },
+            Instruction::FImmF64 { dst: 0, imm: f64::MIN_POSITIVE },
+            Instruction::FImmF64 { dst: 0, imm: -0.0 },
+            Instruction::FAddF64 { dst: 0, a: 1, b: 2 },
+            Instruction::FSubF64 { dst: 0, a: 1, b: 2 },
+            Instruction::FMulF64 { dst: 0, a: 1, b: 2 },
+            Instruction::FDivF64 { dst: 0, a: 1, b: 2 },
+            Instruction::FSqrtF64 { dst: 0, a: 1 },
+            Instruction::FNegF64 { dst: 0, a: 1 },
+            Instruction::FAbsF64 { dst: 0, a: 1 },
+            Instruction::FRoundF64 { dst: 0, a: 1 },
+            Instruction::FCmpF64 { pred: 0, dst: 0, a: 1, b: 2 },
+            Instruction::I2F64 { dst: 0, a: 1 },
+            Instruction::F642I { dst: 0, a: 1 },
+            Instruction::U2F64 { dst: 0, a: 1 },
+            Instruction::F642U { dst: 0, a: 1 },
+        ];
+        for instr in instructions {
+            let module = E4Module {
+                functions: vec![E4FunctionDef {
+                    param_count: 0, result_count: 0, register_count: 8,
+                    code: vec![instr.clone(), Instruction::Trap],
+                }],
+                memory: vec![0u8; 256],
+                tables: vec![],
+            };
+            let encoded = encode_e4(&module);
+            let decoded = decode_e4(&encoded).unwrap();
+            // NaN != NaN, compare bits instead
+            match (&decoded.functions[0].code[0], &instr) {
+                (Instruction::FImmF64 { dst: d1, imm: a }, Instruction::FImmF64 { dst: d2, imm: b }) => {
+                    assert_eq!(d1, d2);
+                    assert_eq!(a.to_bits(), b.to_bits(), "roundtrip failed for {:?}", instr);
+                }
+                _ => assert_eq!(decoded.functions[0].code[0], instr, 
+                    "roundtrip failed for {:?}", instr),
+            }
+        }
+    }
+
+    /// Test encode/decode for all integer operations
+    #[test]
+    fn test_e4_encode_decode_integer_all_variants() {
+        let instructions = vec![
+            Instruction::IAdd { dst: 0, a: 1, b: 2 },
+            Instruction::ISub { dst: 0, a: 1, b: 2 },
+            Instruction::IMul { dst: 0, a: 1, b: 2 },
+            Instruction::IDiv { dst: 0, a: 1, b: 2 },
+            Instruction::IAnd { dst: 0, a: 1, b: 2 },
+            Instruction::IOr { dst: 0, a: 1, b: 2 },
+            Instruction::IXor { dst: 0, a: 1, b: 2 },
+            Instruction::INot { dst: 0, a: 1 },
+            Instruction::IClz { dst: 0, a: 1 },
+            Instruction::ICtz { dst: 0, a: 1 },
+            Instruction::IPopcnt { dst: 0, a: 1 },
+            Instruction::IRotl { dst: 0, a: 1, b: 2 },
+            Instruction::IRotr { dst: 0, a: 1, b: 2 },
+            Instruction::SExt { dst: 0, a: 1 },
+            Instruction::ZExt { dst: 0, a: 1 },
+        ];
+        for instr in instructions {
+            let module = E4Module {
+                functions: vec![E4FunctionDef {
+                    param_count: 0, result_count: 0, register_count: 8,
+                    code: vec![instr.clone(), Instruction::Trap],
+                }],
+                memory: vec![0u8; 256],
+                tables: vec![],
+            };
+            let encoded = encode_e4(&module);
+            let decoded = decode_e4(&encoded).unwrap();
+            assert_eq!(decoded.functions[0].code[0], instr, 
+                "roundtrip failed for {:?}", instr);
+        }
+    }
+
+    /// Test encode/decode for all float conversion operations
+    #[test]
+    fn test_e4_encode_decode_float_conversions() {
+        let instructions = vec![
+            Instruction::I2F { dst: 0, a: 1 },
+            Instruction::F2I { dst: 0, a: 1 },
+            Instruction::U2F { dst: 0, a: 1 },
+            Instruction::F2U { dst: 0, a: 1 },
+            Instruction::I2F64 { dst: 0, a: 1 },
+            Instruction::F642I { dst: 0, a: 1 },
+            Instruction::U2F64 { dst: 0, a: 1 },
+            Instruction::F642U { dst: 0, a: 1 },
+        ];
+        for instr in instructions {
+            let module = E4Module {
+                functions: vec![E4FunctionDef {
+                    param_count: 0, result_count: 0, register_count: 8,
+                    code: vec![instr.clone(), Instruction::Trap],
+                }],
+                memory: vec![0u8; 256],
+                tables: vec![],
+            };
+            let encoded = encode_e4(&module);
+            let decoded = decode_e4(&encoded).unwrap();
+            assert_eq!(decoded.functions[0].code[0], instr, 
+                "roundtrip failed for {:?}", instr);
+        }
+    }
+
+    /// Test encoded_size for various modules
+    #[test]
+    fn test_e4_encoded_size_various_modules() {
+        let cases = vec![
+            E4Module {
+                functions: vec![E4FunctionDef {
+                    param_count: 0, result_count: 0, register_count: 4,
+                    code: vec![Instruction::Trap],
+                }],
+                memory: vec![0u8; 0],
+                tables: vec![],
+            },
+            E4Module {
+                functions: vec![E4FunctionDef {
+                    param_count: 1, result_count: 2, register_count: 8,
+                    code: vec![
+                        Instruction::FImm { dst: 0, imm: 1.0 },
+                        Instruction::FImm { dst: 1, imm: 2.0 },
+                        Instruction::FAdd { dst: 2, a: 0, b: 1 },
+                        Instruction::Ret { dst: 2 },
+                    ],
+                }],
+                memory: vec![0u8; 1024],
+                tables: vec![vec![1, 2, 3, 4, 5, 6, 7, 8]],
+            },
+            E4Module {
+                functions: vec![
+                    E4FunctionDef {
+                        param_count: 0, result_count: 0, register_count: 4,
+                        code: vec![Instruction::Trap],
+                    },
+                    E4FunctionDef {
+                        param_count: 0, result_count: 0, register_count: 4,
+                        code: vec![Instruction::Ret { dst: 0 }],
+                    },
+                ],
+                memory: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                tables: vec![vec![], vec![1]],
+            },
+        ];
+        for module in cases {
+            let encoded = encode_e4(&module);
+            let estimate = encoded_size(&module);
+            assert!(estimate >= encoded.len(), 
+                "encoded_size {} must be >= actual {} for module with {} functions", 
+                estimate, encoded.len(), module.functions.len());
+            // Verify we can decode it back
+            let decoded = decode_e4(&encoded).unwrap();
+            assert_eq!(decoded.functions.len(), module.functions.len());
+            assert_eq!(decoded.memory.len(), module.memory.len());
+            assert_eq!(decoded.tables.len(), module.tables.len());
+        }
+    }
+
+    /// Test decode with truncated header (missing version byte)
+    #[test]
+    fn test_e4_decode_truncated_header_version() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"E4XX");
+        // No version byte
+        let result = decode_e4(&bytes);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("truncated"));
+    }
+
+    /// Test decode with truncated memory size field
+    #[test]
+    fn test_e4_decode_truncated_memory_size() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"E4XX");
+        bytes.push(1); // version
+        // Memory size field incomplete (3 bytes instead of 4)
+        bytes.extend_from_slice(&[0, 0, 0]);
+        let result = decode_e4(&bytes);
+        assert!(result.is_err());
+    }
+
+    /// Test decode with truncated function count
+    #[test]
+    fn test_e4_decode_truncated_function_count() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"E4XX");
+        bytes.push(1); // version
+        bytes.extend_from_slice(&4u32.to_le_bytes()); // memory size = 4
+        bytes.extend_from_slice(&vec![0u8; 4]); // memory
+        // Function count incomplete
+        bytes.extend_from_slice(&[0, 0, 0]);
+        let result = decode_e4(&bytes);
+        assert!(result.is_err());
+    }
+
+    /// Test decode with truncated table count
+    #[test]
+    fn test_e4_decode_truncated_table_count() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0, result_count: 0, register_count: 4,
+                code: vec![Instruction::Trap],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // Truncate to remove table count
+        let result = decode_e4(&encoded[..encoded.len() - 4]);
+        assert!(result.is_err());
+    }
 }

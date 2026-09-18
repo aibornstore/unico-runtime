@@ -182,6 +182,117 @@ mod tests {
     }
 
     #[test]
+    fn test_error_from_conversion_host_errors() {
+        // Test HostDenied returns exit code 7
+        let err = Error::HostDenied("capability denied".into());
+        let code: u8 = err.into();
+        assert_eq!(code, 7);
+
+        // Test HostBudgetExceeded returns exit code 7
+        let err = Error::HostBudgetExceeded("budget exceeded".into());
+        let code: u8 = err.into();
+        assert_eq!(code, 7);
+    }
+
+    #[test]
+    fn test_error_from_conversion_io_error() {
+        // Test Io error returns exit code 70
+        use std::io;
+        let io_err = io::Error::new(io::ErrorKind::NotFound, "file not found");
+        let err = Error::Io(io_err);
+        let code: u8 = err.into();
+        assert_eq!(code, 70);
+    }
+
+    #[test]
+    fn test_error_io_display() {
+        use std::io;
+        let io_err = io::Error::new(io::ErrorKind::PermissionDenied, "access denied");
+        let err = Error::Io(io_err);
+        let msg = err.to_string();
+        assert!(msg.contains("access denied") || msg.contains("permission denied"));
+    }
+
+    #[test]
+    fn test_error_canonical_display() {
+        let err = Error::Canonical("canonical error test".into());
+        let msg = err.to_string();
+        assert!(msg.contains("canonical") || msg.contains("Canonical"));
+    }
+
+    #[test]
+    fn test_error_code_debug() {
+        // Test Debug output for all ErrorCode variants
+        let codes = [
+            ErrorCode::E0T001Explicit,
+            ErrorCode::E0T002Structural,
+            ErrorCode::E0T003Canonical,
+            ErrorCode::E1T001Explicit,
+            ErrorCode::E1T002Fuel,
+            ErrorCode::E1T003CFG,
+            ErrorCode::E1T004Type,
+            ErrorCode::E2T001Explicit,
+            ErrorCode::E2T002Fuel,
+            ErrorCode::E2T003MemoryOOB,
+            ErrorCode::E2T004MemoryAlign,
+            ErrorCode::E2T005CallDepth,
+            ErrorCode::H0001CapabilityDenied,
+            ErrorCode::H0002BudgetExceeded,
+            ErrorCode::H0003InvalidRequest,
+        ];
+        for code in codes {
+            let _dbg = format!("{:?}", code);
+        }
+    }
+
+    #[test]
+    fn test_error_code_clone_copy() {
+        // Test Clone and Copy traits for ErrorCode
+        let code = ErrorCode::E0T001Explicit;
+        let cloned = code.clone();
+        let copied = code;
+        assert_eq!(cloned, copied);
+    }
+
+    #[test]
+    fn test_error_code_partial_eq() {
+        // Test PartialEq for ErrorCode
+        assert_eq!(ErrorCode::E0T001Explicit, ErrorCode::E0T001Explicit);
+        assert_ne!(ErrorCode::E0T001Explicit, ErrorCode::E0T002Structural);
+    }
+
+    #[test]
+    fn test_error_result_type() {
+        // Test the Result type alias
+        let result: Result<i32> = Ok(42);
+        assert!(result.is_ok());
+        let result: Result<i32> = Err(Error::Format("test".into()));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_from_io_error() {
+        // Test From<std::io::Error> for Error (from the #[from] attribute)
+        use std::io;
+        let io_err = io::Error::new(io::ErrorKind::Other, "test io error");
+        let err: Error = io_err.into();
+        match err {
+            Error::Io(_) => {}
+            _ => panic!("Expected Error::Io"),
+        }
+    }
+
+    #[test]
+    fn test_error_io_from_conversion() {
+        // Test Io error conversion to u8 via From<Error>
+        use std::io;
+        let io_err = io::Error::new(io::ErrorKind::Other, "test");
+        let err = Error::from(io_err);
+        let code: u8 = err.into();
+        assert_eq!(code, 70);
+    }
+
+    #[test]
     fn test_error_display() {
         let err = Error::Format("test".into());
         assert!(err.to_string().contains("test"));

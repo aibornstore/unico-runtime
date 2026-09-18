@@ -5622,4 +5622,679 @@ mod tests {
         let decoded = decode(&encode(&module)).unwrap();
         assert_eq!(decoded.tables[0].targets.len(), 10);
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Additional coverage tests for 100% regions
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Test decode_op: Nop variant (0) explicit decode - covers encode path
+    #[test]
+    fn test_ser_decode_op_nop_explicit() {
+        let buf = vec![0];
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Nop));
+    }
+
+    /// Test decode_op: Const with U64 value explicit decode (variant 1)
+    #[test]
+    fn test_ser_decode_op_const_u64() {
+        let bits: u64 = 0xDEADBEEFCAFEBABEu64;
+        let mut buf = vec![1]; // variant=Const
+        buf.extend_from_slice(&0u32.to_le_bytes()); // dst=0
+        buf.push(4); // value type=U64
+        buf.extend_from_slice(&bits.to_le_bytes());
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Const { dst: 0, value: U30Value::U64(v) } if v == bits));
+    }
+
+    /// Test decode_op: Binary with all valid binary ops (variants 2 with valid op_idx)
+    #[test]
+    fn test_ser_decode_op_binary_all_ops() {
+        use crate::ir::U30BinaryOp as Op;
+        let ops = [
+            (0u32, Op::AddWrapU64), (1, Op::AddWrapU32), (2, Op::SubWrapU64),
+            (3, Op::SubWrapU32), (4, Op::MulWrapU64), (5, Op::MulWrapU32),
+            (6, Op::AndU8), (7, Op::OrU8), (8, Op::XorU8),
+            (9, Op::ShlU64), (10, Op::ShlU32), (11, Op::ShrU64), (12, Op::ShrU32),
+            (13, Op::DivU64), (14, Op::DivU32), (15, Op::RemU64), (16, Op::RemU32),
+            (17, Op::Eq), (18, Op::LtU64), (19, Op::GtU64), (20, Op::GeU64),
+            (21, Op::LeU64), (22, Op::LeU32), (23, Op::MinU64), (24, Op::MaxU64),
+            (25, Op::MinU32), (26, Op::MaxU32),
+        ];
+        for (op_idx, op) in ops {
+            let mut buf = vec![2]; // variant=Binary
+            buf.extend_from_slice(&op_idx.to_le_bytes()); // op_idx
+            buf.extend_from_slice(&0u32.to_le_bytes()); // dst
+            buf.extend_from_slice(&1u32.to_le_bytes()); // a
+            buf.extend_from_slice(&2u32.to_le_bytes()); // b
+            let mut pos = 0;
+            let decoded_op = decode_op(&buf, &mut pos).unwrap();
+            assert!(matches!(decoded_op, U30Op::Binary { op: decoded, .. } if decoded == op), 
+                "Binary op_idx {} mismatch", op_idx);
+        }
+    }
+
+    /// Test decode_op: variants 4-7 (Not variants) full decode
+    #[test]
+    fn test_ser_decode_op_all_not_variants() {
+        let cases = [
+            (4u8, U30Op::NotU8 { dst: 1, src: 2 }),
+            (5, U30Op::NotU16 { dst: 3, src: 4 }),
+            (6, U30Op::NotU32 { dst: 5, src: 6 }),
+            (7, U30Op::NotU64 { dst: 7, src: 8 }),
+        ];
+        for (variant, expected) in cases {
+            let mut buf = vec![variant];
+            if let U30Op::NotU8 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::NotU16 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::NotU32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::NotU64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            let mut pos = 0;
+            let op = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(op, expected);
+        }
+    }
+
+    /// Test decode_op: variants 10-16 (Conversion and unary) full decode
+    #[test]
+    fn test_ser_decode_op_all_conversion_unary() {
+        let cases = [
+            (8u8, U30Op::I2F { dst: 0, src: 1 }),
+            (9, U30Op::F2I { dst: 1, src: 2 }),
+            (10, U30Op::TruncF32U64 { dst: 2, src: 3 }),
+            (11, U30Op::ReinterpretF32U32 { dst: 3, src: 4 }),
+            (12, U30Op::ReinterpretU32F32 { dst: 4, src: 5 }),
+            (13, U30Op::AbsU64 { dst: 5, src: 6 }),
+            (14, U30Op::AbsU32 { dst: 6, src: 7 }),
+            (15, U30Op::NegU64 { dst: 7, src: 8 }),
+            (16, U30Op::NegU32 { dst: 8, src: 9 }),
+        ];
+        for (variant, expected) in cases {
+            let mut buf = vec![variant];
+            if let U30Op::I2F { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::F2I { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::TruncF32U64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ReinterpretF32U32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ReinterpretU32F32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::AbsU64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::AbsU32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::NegU64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::NegU32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            let mut pos = 0;
+            let op = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(op, expected);
+        }
+    }
+
+    /// Test decode_op: variants 17-22 (bit count ops) full decode
+    #[test]
+    fn test_ser_decode_op_all_bit_count() {
+        let cases = [
+            (17u8, U30Op::CtzU64 { dst: 0, src: 1 }),
+            (18, U30Op::CtzU32 { dst: 1, src: 2 }),
+            (19, U30Op::ClzU64 { dst: 2, src: 3 }),
+            (20, U30Op::ClzU32 { dst: 3, src: 4 }),
+            (21, U30Op::PopcntU64 { dst: 4, src: 5 }),
+            (22, U30Op::PopcntU32 { dst: 5, src: 6 }),
+        ];
+        for (variant, expected) in cases {
+            let mut buf = vec![variant];
+            if let U30Op::CtzU64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::CtzU32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ClzU64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ClzU32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::PopcntU64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::PopcntU32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            let mut pos = 0;
+            let op = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(op, expected);
+        }
+    }
+
+    /// Test decode_op: variants 23-26 (rotate ops) full decode
+    #[test]
+    fn test_ser_decode_op_all_rotate() {
+        let cases = [
+            (23u8, U30Op::RotlU64 { dst: 0, val: 1, sh: 2 }),
+            (24, U30Op::RotlU32 { dst: 1, val: 2, sh: 3 }),
+            (25, U30Op::RotrU64 { dst: 2, val: 3, sh: 4 }),
+            (26, U30Op::RotrU32 { dst: 3, val: 4, sh: 5 }),
+        ];
+        for (variant, expected) in cases {
+            let mut buf = vec![variant];
+            if let U30Op::RotlU64 { dst, val, sh } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&val.to_le_bytes()); buf.extend_from_slice(&sh.to_le_bytes()); }
+            if let U30Op::RotlU32 { dst, val, sh } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&val.to_le_bytes()); buf.extend_from_slice(&sh.to_le_bytes()); }
+            if let U30Op::RotrU64 { dst, val, sh } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&val.to_le_bytes()); buf.extend_from_slice(&sh.to_le_bytes()); }
+            if let U30Op::RotrU32 { dst, val, sh } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&val.to_le_bytes()); buf.extend_from_slice(&sh.to_le_bytes()); }
+            let mut pos = 0;
+            let op = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(op, expected);
+        }
+    }
+
+    /// Test decode_op: variants 27-31 (F32 comparison ops) full decode
+    #[test]
+    fn test_ser_decode_op_all_f32_cmp() {
+        let cases = [
+            (27u8, U30Op::FEq { dst: 0, a: 1, b: 2 }),
+            (28, U30Op::FLt { dst: 1, a: 2, b: 3 }),
+            (29, U30Op::FGt { dst: 2, a: 3, b: 4 }),
+            (30, U30Op::FLe { dst: 3, a: 4, b: 5 }),
+            (31, U30Op::FGe { dst: 4, a: 5, b: 6 }),
+        ];
+        for (variant, expected) in cases {
+            let mut buf = vec![variant];
+            if let U30Op::FEq { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::FLt { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::FGt { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::FLe { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::FGe { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            let mut pos = 0;
+            let op = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(op, expected);
+        }
+    }
+
+    /// Test decode_op: variants 32-40 (F32 arithmetic ops) full decode
+    #[test]
+    fn test_ser_decode_op_all_f32_arith() {
+        let cases = [
+            (32u8, U30Op::FAdd { dst: 0, a: 1, b: 2 }),
+            (33, U30Op::FSub { dst: 1, a: 2, b: 3 }),
+            (34, U30Op::FMul { dst: 2, a: 3, b: 4 }),
+            (35, U30Op::FDiv { dst: 3, a: 4, b: 5 }),
+            (36, U30Op::FSqrt { dst: 4, src: 5 }),
+            (37, U30Op::FAbs { dst: 5, src: 6 }),
+            (38, U30Op::FNeg { dst: 6, src: 7 }),
+            (39, U30Op::FMin { dst: 7, a: 8, b: 9 }),
+            (40, U30Op::FMax { dst: 8, a: 9, b: 10 }),
+        ];
+        for (variant, expected) in cases {
+            let mut buf = vec![variant];
+            if let U30Op::FAdd { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::FSub { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::FMul { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::FDiv { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::FSqrt { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::FAbs { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::FNeg { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::FMin { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::FMax { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            let mut pos = 0;
+            let op = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(op, expected);
+        }
+    }
+
+    /// Test decode_op: variants 41-49 (ZExt/Trunc ops) full decode
+    #[test]
+    fn test_ser_decode_op_all_zext_trunc() {
+        let cases = [
+            (41u8, U30Op::ZExtI8U16 { dst: 0, src: 1 }),
+            (42, U30Op::ZExtI8U32 { dst: 1, src: 2 }),
+            (43, U30Op::ZExtI8U64 { dst: 2, src: 3 }),
+            (44, U30Op::ZExtI16U32 { dst: 3, src: 4 }),
+            (45, U30Op::ZExtI16U64 { dst: 4, src: 5 }),
+            (46, U30Op::ZExtI32U64 { dst: 5, src: 6 }),
+            (47, U30Op::TruncU64U32 { dst: 6, src: 7 }),
+            (48, U30Op::TruncU64U16 { dst: 7, src: 8 }),
+            (49, U30Op::TruncU32U16 { dst: 8, src: 9 }),
+        ];
+        for (variant, expected) in cases {
+            let mut buf = vec![variant];
+            if let U30Op::ZExtI8U16 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ZExtI8U32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ZExtI8U64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ZExtI16U32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ZExtI16U64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ZExtI32U64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::TruncU64U32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::TruncU64U16 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::TruncU32U16 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            let mut pos = 0;
+            let op = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(op, expected);
+        }
+    }
+
+    /// Test decode_op: variants 54-67 (F64 arithmetic/comparison ops) full decode
+    #[test]
+    fn test_ser_decode_op_all_f64_ops() {
+        let cases = [
+            (54u8, U30Op::F64Eq { dst: 0, a: 1, b: 2 }),
+            (55, U30Op::F64Lt { dst: 1, a: 2, b: 3 }),
+            (56, U30Op::F64Gt { dst: 2, a: 3, b: 4 }),
+            (57, U30Op::F64Le { dst: 3, a: 4, b: 5 }),
+            (58, U30Op::F64Ge { dst: 4, a: 5, b: 6 }),
+            (59, U30Op::F64Add { dst: 5, a: 6, b: 7 }),
+            (60, U30Op::F64Sub { dst: 6, a: 7, b: 8 }),
+            (61, U30Op::F64Mul { dst: 7, a: 8, b: 9 }),
+            (62, U30Op::F64Div { dst: 8, a: 9, b: 10 }),
+            (63, U30Op::F64Sqrt { dst: 9, src: 10 }),
+            (64, U30Op::F64Abs { dst: 10, src: 11 }),
+            (65, U30Op::F64Neg { dst: 11, src: 12 }),
+            (66, U30Op::F64Min { dst: 12, a: 13, b: 14 }),
+            (67, U30Op::F64Max { dst: 13, a: 14, b: 15 }),
+        ];
+        for (variant, expected) in cases {
+            let mut buf = vec![variant];
+            if let U30Op::F64Eq { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::F64Lt { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::F64Gt { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::F64Le { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::F64Ge { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::F64Add { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::F64Sub { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::F64Mul { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::F64Div { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::F64Sqrt { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::F64Abs { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::F64Neg { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::F64Min { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            if let U30Op::F64Max { dst, a, b } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&a.to_le_bytes()); buf.extend_from_slice(&b.to_le_bytes()); }
+            let mut pos = 0;
+            let op = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(op, expected);
+        }
+    }
+
+    /// Test decode_op: variants 68-73 (F64 conversion ops) full decode
+    #[test]
+    fn test_ser_decode_op_all_f64_conversions() {
+        let cases = [
+            (68u8, U30Op::I64F64 { dst: 0, src: 1 }),
+            (69, U30Op::F64I64 { dst: 1, src: 2 }),
+            (70, U30Op::F32F64 { dst: 2, src: 3 }),
+            (71, U30Op::F64F32 { dst: 3, src: 4 }),
+            (72, U30Op::ReinterpretF64U64 { dst: 4, src: 5 }),
+            (73, U30Op::ReinterpretU64F64 { dst: 5, src: 6 }),
+        ];
+        for (variant, expected) in cases {
+            let mut buf = vec![variant];
+            if let U30Op::I64F64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::F64I64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::F32F64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::F64F32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ReinterpretF64U64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ReinterpretU64F64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            let mut pos = 0;
+            let op = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(op, expected);
+        }
+    }
+
+    /// Test decode_op: variants 74-82 (SExt and ByteSwap ops) full decode
+    #[test]
+    fn test_ser_decode_op_all_sext_byteswap() {
+        let cases = [
+            (74u8, U30Op::SExtI8U16 { dst: 0, src: 1 }),
+            (75, U30Op::SExtI8U32 { dst: 1, src: 2 }),
+            (76, U30Op::SExtI8U64 { dst: 2, src: 3 }),
+            (77, U30Op::SExtI16U32 { dst: 3, src: 4 }),
+            (78, U30Op::SExtI16U64 { dst: 4, src: 5 }),
+            (79, U30Op::SExtI32U64 { dst: 5, src: 6 }),
+            (80, U30Op::ByteSwapU16 { dst: 6, src: 7 }),
+            (81, U30Op::ByteSwapU32 { dst: 7, src: 8 }),
+            (82, U30Op::ByteSwapU64 { dst: 8, src: 9 }),
+        ];
+        for (variant, expected) in cases {
+            let mut buf = vec![variant];
+            if let U30Op::SExtI8U16 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::SExtI8U32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::SExtI8U64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::SExtI16U32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::SExtI16U64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::SExtI32U64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ByteSwapU16 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ByteSwapU32 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            if let U30Op::ByteSwapU64 { dst, src } = expected { buf.extend_from_slice(&dst.to_le_bytes()); buf.extend_from_slice(&src.to_le_bytes()); }
+            let mut pos = 0;
+            let op = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(op, expected);
+        }
+    }
+
+    /// Test decode_op: variants 83-84 (Call and IndirectCall) with args/results
+    #[test]
+    fn test_ser_decode_op_call_indirect_with_args() {
+        // Call with multiple args and results
+        let mut buf = vec![83]; // variant=Call
+        buf.extend_from_slice(&1u32.to_le_bytes()); // function=1
+        buf.extend_from_slice(&2u32.to_le_bytes()); // arg_count=2
+        buf.extend_from_slice(&10u32.to_le_bytes()); // arg1
+        buf.extend_from_slice(&11u32.to_le_bytes()); // arg2
+        buf.extend_from_slice(&2u32.to_le_bytes()); // result_count=2
+        buf.extend_from_slice(&20u32.to_le_bytes()); // result1
+        buf.extend_from_slice(&21u32.to_le_bytes()); // result2
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Call { function: 1, args, results } 
+            if args == &[10, 11] && results == &[20, 21]));
+
+        // IndirectCall with multiple args and results
+        let mut buf2 = vec![84]; // variant=IndirectCall
+        buf2.extend_from_slice(&2u32.to_le_bytes()); // function_reg=2
+        buf2.extend_from_slice(&3u32.to_le_bytes()); // arg_count=3
+        buf2.extend_from_slice(&30u32.to_le_bytes()); // arg1
+        buf2.extend_from_slice(&31u32.to_le_bytes()); // arg2
+        buf2.extend_from_slice(&32u32.to_le_bytes()); // arg3
+        buf2.extend_from_slice(&1u32.to_le_bytes()); // result_count=1
+        buf2.extend_from_slice(&40u32.to_le_bytes()); // result1
+        let mut pos = 0;
+        let op2 = decode_op(&buf2, &mut pos).unwrap();
+        assert!(matches!(op2, U30Op::IndirectCall { function: 2, args, results } 
+            if args == &[30, 31, 32] && results == &[40]));
+    }
+
+    /// Test decode_op: truncations for all 2-register ops (coverage for read_u32 errors)
+    #[test]
+    fn test_ser_decode_op_truncated_two_reg_ops() {
+        // Test a few representative variants - the pattern is the same for all 2-register ops
+        // Variant 8 (I2F): dst(4) + src(4) = 8 bytes needed
+        let buf = vec![8, 0, 0, 0, 0]; // variant + dst only
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "I2F truncated");
+
+        // Variant 36 (FSqrt): dst(4) + src(4) = 8 bytes needed
+        let buf = vec![36, 0, 0, 0, 0]; // variant + dst only
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "FSqrt truncated");
+
+        // Variant 52 (MemSize): dst(4) + region(4) = 8 bytes needed
+        let buf = vec![52, 0, 0, 0, 0]; // variant + dst only
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "MemSize truncated");
+    }
+
+    /// Test decode_op: truncations for all 3-register ops
+    #[test]
+    fn test_ser_decode_op_truncated_three_reg_ops() {
+        // Variant 27 (FEq): dst(4) + a(4) + b(4) = 12 bytes needed
+        let buf = vec![27, 0, 0, 0, 0, 1, 0, 0, 0]; // variant + dst + a only
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "FEq truncated");
+
+        // Variant 2 (Binary): op_idx(4) + dst(4) + a(4) + b(4) = 16 bytes needed
+        let buf = vec![2, 0, 0, 0, 0, 0, 0, 0, 0]; // variant + op_idx + dst + a only
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "Binary truncated");
+    }
+
+    /// Test decode_terminator: BrIf with full fields
+    #[test]
+    fn test_ser_decode_terminator_brif_full() {
+        let buf = vec![1, 5, 0, 0, 0, 10, 0, 0, 0, 20, 0, 0, 0]; // cond=5, then=10, else=20
+        let mut pos = 0;
+        let t = decode_terminator(&buf, &mut pos).unwrap();
+        assert!(matches!(t, U30Terminator::BrIf { cond: 5, then_target: 10, else_target: 20 }));
+    }
+
+    /// Test decode_terminator: Ret with zero values
+    #[test]
+    fn test_ser_decode_terminator_ret_empty() {
+        let buf = vec![2, 0, 0, 0, 0]; // variant=Ret, count=0
+        let mut pos = 0;
+        let t = decode_terminator(&buf, &mut pos).unwrap();
+        assert!(matches!(t, U30Terminator::Ret { values } if values.is_empty()));
+    }
+
+    /// Test decode_terminator: TailCall with zero args
+    #[test]
+    fn test_ser_decode_terminator_tailcall_empty() {
+        let buf = vec![3, 99, 0, 0, 0, 0, 0, 0, 0]; // variant=3, function=99, count=0
+        let mut pos = 0;
+        let t = decode_terminator(&buf, &mut pos).unwrap();
+        assert!(matches!(t, U30Terminator::TailCall { function: 99, args } if args.is_empty()));
+    }
+
+    /// Test decode_value: U16 full path
+    #[test]
+    fn test_ser_decode_value_u16_full() {
+        let buf = vec![2, 0x34, 0x12]; // type=2, value=0x1234
+        let mut pos = 0;
+        let val = decode_value(&buf, &mut pos).unwrap();
+        assert!(matches!(val, U30Value::U16(0x1234)));
+    }
+
+    /// Test decode_value: U32 full path
+    #[test]
+    fn test_ser_decode_value_u32_full() {
+        let buf = vec![3, 0x78, 0x56, 0x34, 0x12]; // type=3, value=0x12345678
+        let mut pos = 0;
+        let val = decode_value(&buf, &mut pos).unwrap();
+        assert!(matches!(val, U30Value::U32(0x12345678)));
+    }
+
+    /// Test decode_value: F64 full path
+    #[test]
+    fn test_ser_decode_value_f64_full() {
+        let bits: u64 = 0x3FF0000000000000u64; // 1.0
+        let mut buf = vec![6]; // type=6
+        buf.extend_from_slice(&bits.to_le_bytes());
+        let mut pos = 0;
+        let val = decode_value(&buf, &mut pos).unwrap();
+        assert!(matches!(val, U30Value::F64(f) if f.to_bits() == bits));
+    }
+
+    /// Test encode paths: encode_value for all types
+    #[test]
+    fn test_ser_encode_all_value_types() {
+        let values = [
+            U30Value::Bool(false),
+            U30Value::Bool(true),
+            U30Value::U8(0),
+            U30Value::U8(255),
+            U30Value::U16(0),
+            U30Value::U16(0xFFFF),
+            U30Value::U32(0),
+            U30Value::U32(u32::MAX),
+            U30Value::U64(0),
+            U30Value::U64(u64::MAX),
+            U30Value::F32(0.0),
+            U30Value::F32(f32::INFINITY),
+            U30Value::F32(f32::NEG_INFINITY),
+            U30Value::F32(f32::NAN),
+            U30Value::F64(0.0),
+            U30Value::F64(f64::INFINITY),
+            U30Value::F64(f64::NEG_INFINITY),
+            U30Value::F64(f64::NAN),
+        ];
+        for val in values {
+            let mut buf = Vec::new();
+            encode_value(&mut buf, &val);
+            let mut pos = 0;
+            let decoded = decode_value(&buf, &mut pos).unwrap();
+            match (&val, &decoded) {
+                (U30Value::Bool(a), U30Value::Bool(b)) => assert_eq!(a, b, "Bool mismatch"),
+                (U30Value::U8(a), U30Value::U8(b)) => assert_eq!(a, b, "U8 mismatch"),
+                (U30Value::U16(a), U30Value::U16(b)) => assert_eq!(a, b, "U16 mismatch"),
+                (U30Value::U32(a), U30Value::U32(b)) => assert_eq!(a, b, "U32 mismatch"),
+                (U30Value::U64(a), U30Value::U64(b)) => assert_eq!(a, b, "U64 mismatch"),
+                (U30Value::F32(a), U30Value::F32(b)) => {
+                    if a.is_nan() { assert!(b.is_nan(), "F32 NaN mismatch"); }
+                    else { assert_eq!(a, b, "F32 mismatch"); }
+                }
+                (U30Value::F64(a), U30Value::F64(b)) => {
+                    if a.is_nan() { assert!(b.is_nan(), "F64 NaN mismatch"); }
+                    else { assert_eq!(a, b, "F64 mismatch"); }
+                }
+                _ => panic!("Type mismatch: {:?} vs {:?}", val, decoded),
+            }
+        }
+    }
+
+    /// Test encode_binary_op: all valid binary ops
+    #[test]
+    fn test_ser_encode_binary_op_all() {
+        use crate::ir::U30BinaryOp as Op;
+        let ops = [
+            Op::AddWrapU64, Op::AddWrapU32, Op::SubWrapU64, Op::SubWrapU32,
+            Op::MulWrapU64, Op::MulWrapU32, Op::AndU8, Op::OrU8, Op::XorU8,
+            Op::ShlU64, Op::ShlU32, Op::ShrU64, Op::ShrU32,
+            Op::DivU64, Op::DivU32, Op::RemU64, Op::RemU32,
+            Op::Eq, Op::LtU64, Op::GtU64, Op::GeU64, Op::LeU64, Op::LeU32,
+            Op::MinU64, Op::MaxU64, Op::MinU32, Op::MaxU32,
+        ];
+        for op in ops {
+            let idx = encode_binary_op(&op);
+            let decoded = decode_binary_op(idx).unwrap();
+            assert_eq!(op, decoded, "BinaryOp mismatch for {:?}", op);
+        }
+    }
+
+    /// Test encode_terminator: all terminator variants
+    #[test]
+    fn test_ser_encode_terminator_all() {
+        let terminators = [
+            U30Terminator::Br { target: 0 },
+            U30Terminator::Br { target: 100 },
+            U30Terminator::BrIf { cond: 0, then_target: 1, else_target: 2 },
+            U30Terminator::Ret { values: vec![] },
+            U30Terminator::Ret { values: vec![1] },
+            U30Terminator::Ret { values: vec![1, 2, 3] },
+            U30Terminator::TailCall { function: 0, args: vec![] },
+            U30Terminator::TailCall { function: 5, args: vec![1, 2] },
+            U30Terminator::Trap { code: 0 },
+            U30Terminator::Trap { code: 99 },
+        ];
+        for term in terminators {
+            let mut buf = Vec::new();
+            encode_terminator(&mut buf, &term);
+            let mut pos = 0;
+            let decoded = decode_terminator(&buf, &mut pos).unwrap();
+            assert_eq!(term, decoded, "Terminator mismatch for {:?}", term);
+        }
+    }
+
+    /// Test encode_op: all op variants roundtrip
+    #[test]
+    fn test_ser_encode_op_all_variants() {
+        let ops = [
+            U30Op::Nop,
+            U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+            U30Op::Const { dst: 0, value: U30Value::U8(42) },
+            U30Op::Const { dst: 0, value: U30Value::U16(1234) },
+            U30Op::Const { dst: 0, value: U30Value::U32(999999) },
+            U30Op::Const { dst: 0, value: U30Value::U64(u64::MAX) },
+            U30Op::Const { dst: 0, value: U30Value::F32(3.14) },
+            U30Op::Const { dst: 0, value: U30Value::F64(2.71828) },
+            U30Op::Binary { dst: 0, op: crate::ir::U30BinaryOp::AddWrapU64, a: 1, b: 2 },
+            U30Op::Select { dst: 0, cond: 1, a: 2, b: 3 },
+            U30Op::NotU8 { dst: 0, src: 1 },
+            U30Op::NotU16 { dst: 0, src: 1 },
+            U30Op::NotU32 { dst: 0, src: 1 },
+            U30Op::NotU64 { dst: 0, src: 1 },
+            U30Op::I2F { dst: 0, src: 1 },
+            U30Op::F2I { dst: 0, src: 1 },
+            U30Op::TruncF32U64 { dst: 0, src: 1 },
+            U30Op::ReinterpretF32U32 { dst: 0, src: 1 },
+            U30Op::ReinterpretU32F32 { dst: 0, src: 1 },
+            U30Op::AbsU64 { dst: 0, src: 1 },
+            U30Op::AbsU32 { dst: 0, src: 1 },
+            U30Op::NegU64 { dst: 0, src: 1 },
+            U30Op::NegU32 { dst: 0, src: 1 },
+            U30Op::CtzU64 { dst: 0, src: 1 },
+            U30Op::CtzU32 { dst: 0, src: 1 },
+            U30Op::ClzU64 { dst: 0, src: 1 },
+            U30Op::ClzU32 { dst: 0, src: 1 },
+            U30Op::PopcntU64 { dst: 0, src: 1 },
+            U30Op::PopcntU32 { dst: 0, src: 1 },
+            U30Op::RotlU64 { dst: 0, val: 1, sh: 2 },
+            U30Op::RotlU32 { dst: 0, val: 1, sh: 2 },
+            U30Op::RotrU64 { dst: 0, val: 1, sh: 2 },
+            U30Op::RotrU32 { dst: 0, val: 1, sh: 2 },
+            U30Op::FEq { dst: 0, a: 1, b: 2 },
+            U30Op::FLt { dst: 0, a: 1, b: 2 },
+            U30Op::FGt { dst: 0, a: 1, b: 2 },
+            U30Op::FLe { dst: 0, a: 1, b: 2 },
+            U30Op::FGe { dst: 0, a: 1, b: 2 },
+            U30Op::FAdd { dst: 0, a: 1, b: 2 },
+            U30Op::FSub { dst: 0, a: 1, b: 2 },
+            U30Op::FMul { dst: 0, a: 1, b: 2 },
+            U30Op::FDiv { dst: 0, a: 1, b: 2 },
+            U30Op::FSqrt { dst: 0, src: 1 },
+            U30Op::FAbs { dst: 0, src: 1 },
+            U30Op::FNeg { dst: 0, src: 1 },
+            U30Op::FMin { dst: 0, a: 1, b: 2 },
+            U30Op::FMax { dst: 0, a: 1, b: 2 },
+            U30Op::ZExtI8U16 { dst: 0, src: 1 },
+            U30Op::ZExtI8U32 { dst: 0, src: 1 },
+            U30Op::ZExtI8U64 { dst: 0, src: 1 },
+            U30Op::ZExtI16U32 { dst: 0, src: 1 },
+            U30Op::ZExtI16U64 { dst: 0, src: 1 },
+            U30Op::ZExtI32U64 { dst: 0, src: 1 },
+            U30Op::TruncU64U32 { dst: 0, src: 1 },
+            U30Op::TruncU64U16 { dst: 0, src: 1 },
+            U30Op::TruncU32U16 { dst: 0, src: 1 },
+            U30Op::MemCopy { dst_region: 0, dst_offset: 1, src_region: 2, src_offset: 3, size: 4 },
+            U30Op::MemFill { region: 0, offset: 1, value: 2, size: 3 },
+            U30Op::MemSize { dst: 0, region: 1 },
+            U30Op::MemGrow { dst: 0, region: 1, delta: 2 },
+            U30Op::F64Eq { dst: 0, a: 1, b: 2 },
+            U30Op::F64Lt { dst: 0, a: 1, b: 2 },
+            U30Op::F64Gt { dst: 0, a: 1, b: 2 },
+            U30Op::F64Le { dst: 0, a: 1, b: 2 },
+            U30Op::F64Ge { dst: 0, a: 1, b: 2 },
+            U30Op::F64Add { dst: 0, a: 1, b: 2 },
+            U30Op::F64Sub { dst: 0, a: 1, b: 2 },
+            U30Op::F64Mul { dst: 0, a: 1, b: 2 },
+            U30Op::F64Div { dst: 0, a: 1, b: 2 },
+            U30Op::F64Sqrt { dst: 0, src: 1 },
+            U30Op::F64Abs { dst: 0, src: 1 },
+            U30Op::F64Neg { dst: 0, src: 1 },
+            U30Op::F64Min { dst: 0, a: 1, b: 2 },
+            U30Op::F64Max { dst: 0, a: 1, b: 2 },
+            U30Op::I64F64 { dst: 0, src: 1 },
+            U30Op::F64I64 { dst: 0, src: 1 },
+            U30Op::F32F64 { dst: 0, src: 1 },
+            U30Op::F64F32 { dst: 0, src: 1 },
+            U30Op::ReinterpretF64U64 { dst: 0, src: 1 },
+            U30Op::ReinterpretU64F64 { dst: 0, src: 1 },
+            U30Op::SExtI8U16 { dst: 0, src: 1 },
+            U30Op::SExtI8U32 { dst: 0, src: 1 },
+            U30Op::SExtI8U64 { dst: 0, src: 1 },
+            U30Op::SExtI16U32 { dst: 0, src: 1 },
+            U30Op::SExtI16U64 { dst: 0, src: 1 },
+            U30Op::SExtI32U64 { dst: 0, src: 1 },
+            U30Op::ByteSwapU16 { dst: 0, src: 1 },
+            U30Op::ByteSwapU32 { dst: 0, src: 1 },
+            U30Op::ByteSwapU64 { dst: 0, src: 1 },
+            U30Op::Call { function: 0, args: vec![1, 2], results: vec![3] },
+            U30Op::IndirectCall { function: 0, args: vec![1, 2], results: vec![3] },
+            U30Op::TableBr { table: 0, index: 1 },
+            U30Op::Break { code: 42 },
+            U30Op::Assert { cond: 0, msg: 1 },
+            U30Op::LoadU8 { dst: 0, region: 1, offset: 2 },
+            U30Op::StoreU8 { region: 0, offset: 1, src: 2 },
+            U30Op::LoadU16 { dst: 0, region: 1, offset: 2 },
+            U30Op::StoreU16 { region: 0, offset: 1, src: 2 },
+            U30Op::LoadU32 { dst: 0, region: 1, offset: 2 },
+            U30Op::StoreU32 { region: 0, offset: 1, src: 2 },
+            U30Op::LoadU64 { dst: 0, region: 1, offset: 2 },
+            U30Op::StoreU64 { region: 0, offset: 1, src: 2 },
+        ];
+        for op in ops {
+            let mut buf = Vec::new();
+            encode_op(&mut buf, &op);
+            let mut pos = 0;
+            let decoded = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(op, decoded, "Op mismatch for {:?}", op);
+        }
+    }
+
+    /// Test decode_value: U16 truncated (end of file test)
+    #[test]
+    fn test_ser_decode_value_truncated_u16_eof() {
+        let buf = vec![2, 0x42]; // type=U16 but only 1 byte
+        let mut pos = 0;
+        let err = decode_value(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
 }

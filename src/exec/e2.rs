@@ -904,4 +904,216 @@ mod tests {
         let module = Module::parse(&bytes);
         assert!(module.is_err());
     }
+    
+    // ── Module::verify error paths ─────────────────────────────────────────
+    
+    #[test]
+    fn test_e2_verify_empty_functions() {
+        let module = Module { profile: Profile::E2, functions: vec![] };
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("No functions"));
+    }
+    
+    #[test]
+    fn test_e2_verify_entry_must_have_zero_params() {
+        let code = vec![0xa6, 0x01, 0x00]; // RET r0
+        let module_bytes = build_e2(vec![(code, 1, 1)]); // param_count=1
+        let module = Module::parse(&module_bytes).unwrap();
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("0 params"));
+    }
+    
+    #[test]
+    fn test_e2_verify_func_result_count() {
+        // Function with result_count=2
+        let mut bytes = Vec::new();
+        bytes.extend(b"UNICO\xe2");
+        bytes.push(0x02);
+        let mut func_payload = encode_uleb(1); // 1 function
+        func_payload.extend(encode_uleb(0)); // param_count=0
+        func_payload.extend(encode_uleb(2)); // result_count=2 (invalid)
+        func_payload.extend(encode_uleb(1)); // register_count=1
+        func_payload.extend(encode_uleb(0)); // code_offset=0
+        let code = vec![0xa6, 0x01, 0x00]; // RET r0
+        func_payload.extend(encode_uleb(code.len()));
+        func_payload.extend(code.clone());
+        bytes.extend(encode_uleb(func_payload.len()));
+        bytes.extend(func_payload);
+        bytes.push(0x03);
+        bytes.extend(encode_uleb(code.len()));
+        bytes.extend(code);
+        bytes.push(0x00);
+        let module = Module::parse(&bytes);
+        assert!(module.is_err());
+    }
+    
+    #[test]
+    fn test_e2_verify_func_registers_less_than_params() {
+        // func with param_count=2 but register_count=1 — verify should fail
+        let code = vec![0xa6, 0x01, 0x00];
+        let module_bytes = build_e2(vec![(code, 2, 1)]); // param_count=2, reg_count=1
+        let module = Module::parse(&module_bytes).unwrap();
+        let r = module.verify();
+        assert!(r.is_err(), "Expected verification error");
+    }
+    
+    #[test]
+    fn test_e2_verify_func_empty_body() {
+        let code = vec![];
+        let module_bytes = build_e2(vec![(code, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("empty"));
+    }
+    
+    #[test]
+    fn test_e2_verify_func_no_ret() {
+        let code = vec![0x0b, 0x00, 0x05]; // K.I64 r0=5 (no terminator)
+        let module_bytes = build_e2(vec![(code, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("end with RET or TRAP"));
+    }
+    
+    #[test]
+    fn test_e2_verify_func_no_ret_trap() {
+        // Function ending with K.I64 (not RET or TRAP)
+        let code = vec![0x0b, 0x00, 0x05, 0x0b, 0x01, 0x03]; // two KImm, no terminator
+        let module_bytes = build_e2(vec![(code, 0, 2)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("end with RET or TRAP"));
+    }
+    
+    // ── E2Executor::execute error paths ─────────────────────────────────────
+    
+    #[test]
+    fn test_e2_execute_empty_functions() {
+        let module = Module { profile: Profile::E2, functions: vec![] };
+        let mut exec = E2Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("No functions"));
+    }
+    
+    #[test]
+    fn test_e2_execute_entry_non_zero_params() {
+        let code = vec![0xa6, 0x01, 0x00];
+        let module_bytes = build_e2(vec![(code, 1, 1)]); // param_count=1
+        let module = Module::parse(&module_bytes).unwrap();
+        let mut exec = E2Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("0 parameters"));
+    }
+    
+    #[test]
+    fn test_e2_execute_call_stack_overflow() {
+        // Create 9 nested calls (max is 8)
+        
+        // f0: call f1
+        let f0 = vec![
+            0x8f, 0x01, 0x01, 0x00, 0x01, 0x01, // Call f1 argc=1 args=[r0] result_count=1 result_reg=1
+            0xa6, 0x01, 0x01,                   // RET r1
+        ];
+        
+        // f1..f8: identical — each calls the next
+        let inner = vec![
+            0x8f, 0x02, 0x01, 0x00, 0x01, 0x01, // Call f{n+1} argc=1 args=[r0] result_count=1 result_reg=1
+            0xa6, 0x01, 0x01,                   // RET r1
+        ];
+        
+        let mut functions = vec![(f0, 0, 2)]; // f0: no params, 2 regs
+        for _ in 1..=9 {
+            functions.push((inner.clone(), 1, 2)); // each inner: 1 param, 2 regs
+        }
+        
+        let module_bytes = build_e2(functions);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+        
+        let mut exec = E2Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("overflow"));
+    }
+    
+    #[test]
+    fn test_e2_execute_fell_off_end() {
+        // Module whose sole function ends with KImm (no RET/TRAP).
+        // build_e2 always generates valid modules ending with RET/TRAP,
+        // so we build the module manually with the KImm-only code.
+        //
+        // Structure:
+        // FUNC section: func_count=1, then descriptor (5 bytes)
+        //   descriptor: param_count=0, result_count=1, register_count=1,
+        //               code_offset=0, code_size=3
+        //   FUNC section total = 1 + 5 = 6 bytes
+        // CODE section: code_len=3, then 3 bytes of KImm code
+        // END: 0x00
+        let mut bytes = Vec::new();
+        bytes.extend(b"UNICO\xe2");
+        bytes.push(0x02); // FUNC tag
+        // FUNC section payload (before length prefix):
+        //   func_count=1 + descriptor(5) = 6 bytes
+        bytes.extend(encode_uleb(6)); // section payload length
+        bytes.push(0x01); // func_count=1
+        // Function descriptor:
+        bytes.extend(encode_uleb(0)); // param_count=0
+        bytes.extend(encode_uleb(1)); // result_count=1
+        bytes.extend(encode_uleb(1)); // register_count=1
+        bytes.extend(encode_uleb(0)); // code_offset=0
+        bytes.extend(encode_uleb(3)); // code_size=3
+        bytes.push(0x03); // CODE tag
+        bytes.extend(encode_uleb(3)); // code_section_len=3
+        bytes.extend([0x0bu8, 0x00, 0x05]); // K.I64 r0=5 (no terminator)
+        bytes.push(0x00); // END
+        let module = Module::parse(&bytes).unwrap();
+        // verify() would catch this, but we skip it to test execute
+        let mut exec = E2Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("fell off end"));
+    }
+    
+    // ── Additional LOAD error paths ─────────────────────────────────────────
+    
+    #[test]
+    fn test_load_memory_oob() {
+        // LOAD from address 4096 (> 4088 boundary).
+        let code = vec![
+            0x0b, 0x00, 0x80, 0xE0, // K.I64 r0=4096 (2-byte SLEB)
+            0x91, 0x01, 0x00,         // LOAD r1=[r0]
+            0xa6, 0x01, 0x01,         // RET r1
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 2)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.is_some(), "Expected execution error for OOB");
+    }
+    
+    #[test]
+    fn test_load_memory_unaligned() {
+        // LOAD from address 1 (misaligned)
+        let code = vec![
+            0x0b, 0x00, 0x01,       // K.I64 r0=1 (misaligned)
+            0x91, 0x01, 0x00,       // LOAD r1=[r0]
+            0xa6, 0x01, 0x01,       // RET r1
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 2)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().is_some_and(|e| e.contains("alignment")));
+    }
 }
