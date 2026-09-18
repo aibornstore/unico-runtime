@@ -11233,4 +11233,366 @@ mod tests {
         let r = dbg.run_to_completion();
         assert!(r.is_err());
     }
+
+    // === eval_binary: remaining error paths ===
+    #[test]
+    fn test_debugger_binary_or_wrong_type() {
+        // OrU8 with U32 input — as_u8() rejects U32
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U8],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0xF0) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0x0F) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::OrU8, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+
+        // XorU8 with U16 input — as_u8() rejects U16
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U8],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U16(0xF0) },
+                        U30Op::Const { dst: 1, value: U30Value::U16(0x0F) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::XorU8, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_binary_shift_divrem_wrong_type() {
+        // ShlU32 with U64 input — as_u32() rejects U64
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(1) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(3) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::ShlU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+
+        // ShrU64 with Bool input — as_u64() rejects Bool
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(8) },
+                        U30Op::Const { dst: 1, value: U30Value::Bool(true) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::ShrU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+
+        // ShrU32 with U64 input — as_u32() rejects U64
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(8) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(2) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::ShrU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+
+        // DivU64 with F64 input — as_u64() rejects F64
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(10.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(2.0) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::DivU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+
+        // DivU32 with U64 input — as_u32() rejects U64
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(10) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(2) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::DivU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+
+        // RemU64 with Bool input — as_u64() rejects Bool
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(3) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::RemU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+
+        // RemU32 with U64 input — as_u32() rejects U64
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(10) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(3) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::RemU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    // === eval_binary: LtU64/GtU64/GeU64/LeU64/LeU32 error paths ===
+    #[test]
+    fn test_debugger_binary_cmp_wrong_type() {
+        // LtU64 with F64 input
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(5.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(3.0) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::LtU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+
+        // GtU64 with F64 input
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(5.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(3.0) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::GtU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+
+        // GeU64 with F64 input
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(5.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(3.0) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::GeU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+
+        // LeU64 with F64 input
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(5.0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(3.0) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::LeU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+
+        // LeU32 with U64 input — as_u32() rejects U64
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(5) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(3) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::LeU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    // === process_terminator: BrIf error path ===
+    #[test]
+    fn test_debugger_brif_undefined_cond() {
+        // BrIf with undefined condition register — triggers process_terminator ? branch
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::BrIf { cond: 99, then_target: 1, else_target: 0 },
+                    },
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
 }
