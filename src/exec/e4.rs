@@ -1835,4 +1835,327 @@ mod tests {
         assert_eq!(result.status, Status::Pass);
         assert_eq!(result.value.unwrap(), 0x01010101_i64);
     }
+
+    // === Error path tests ===
+
+    #[test]
+    fn test_e4_cmp_unknown_predicate() {
+        // Cmp pred >= 4 is invalid
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 4, dst: 0, a: 0, b: 0 }, // unknown predicate
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err(), "unknown cmp pred should error");
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("unknown cmp pred"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_e4_fcmp_all_predicates() {
+        // Test all 6 valid FCmp predicates: lt(0), le(1), gt(2), ge(3), eq(4), ne(5)
+        // FCmp predicates: lt(0), le(1), gt(2), ge(3), eq(4), ne(5)
+        // Test: a=1.0, b=2.0 → lt=T, le=T, gt=F, ge=F, eq=F, ne=T
+        let preds = [(0u8, 1.0f32, 2.0), (1, 1.0, 2.0), (2, 1.0, 2.0), (3, 1.0, 2.0), (4, 1.0, 2.0), (5, 1.0, 2.0)];
+        let expected = [1i32, 1, 0, 0, 0, 1]; // lt,le,gt,ge,eq,ne
+        for (i, (pred, a, b)) in preds.iter().enumerate() {
+            let mut exec = E4Executor::default();
+            let module = make_module(vec![
+                Instruction::FImm { dst: 0, imm: *a },
+                Instruction::FImm { dst: 1, imm: *b },
+                Instruction::FCmp { pred: *pred, dst: 2, a: 0, b: 1 },
+                Instruction::Ret { dst: 2 },
+            ]);
+            let result = exec.execute(&module, 0).unwrap();
+            assert_eq!(result.value.unwrap(), expected[i] as i64, "FCmp pred {} failed", pred);
+        }
+    }
+
+    #[test]
+    fn test_e4_fcmp_unknown_predicate() {
+        // FCmp pred >= 6 is invalid
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::FImm { dst: 1, imm: 2.0 },
+            Instruction::FCmp { pred: 6, dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err(), "unknown fcmp pred should error");
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("unknown fcmp pred"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_e4_fcmp_f64_all_predicates() {
+        // FCmpF64 predicates: lt(0), le(1), gt(2), ge(3), eq(4), ne(5)
+        // Test: a=1.0, b=2.0 → lt=T, le=T, gt=F, ge=F, eq=F, ne=T
+        let preds = [(0u8, 1.0f64, 2.0), (1, 1.0, 2.0), (2, 1.0, 2.0), (3, 1.0, 2.0), (4, 1.0, 2.0), (5, 1.0, 2.0)];
+        let expected = [1i32, 1, 0, 0, 0, 1];
+        for (i, (pred, a, b)) in preds.iter().enumerate() {
+            let mut exec = E4Executor::default();
+            let module = E4Module {
+                functions: vec![E4FunctionDef {
+                    param_count: 0,
+                    result_count: 1,
+                    register_count: 16,
+                    code: vec![
+                        Instruction::FImmF64 { dst: 0, imm: *a },
+                        Instruction::FImmF64 { dst: 1, imm: *b },
+                        Instruction::FCmpF64 { pred: *pred, dst: 2, a: 0, b: 1 },
+                        Instruction::Ret { dst: 2 },
+                    ],
+                }],
+                memory: vec![0u8; 1024],
+                tables: vec![],
+            };
+            let result = exec.execute(&module, 0).unwrap();
+            assert_eq!(result.value.unwrap(), expected[i] as i64, "FCmpF64 pred {} failed", pred);
+        }
+    }
+
+    #[test]
+    fn test_e4_fcmp_f64_unknown_predicate() {
+        let mut exec = E4Executor::default();
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::FImmF64 { dst: 0, imm: 1.0 },
+                    Instruction::FImmF64 { dst: 1, imm: 2.0 },
+                    Instruction::FCmpF64 { pred: 99, dst: 2, a: 0, b: 1 },
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![0u8; 1024],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err(), "unknown fcmp.f64 pred should error");
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("unknown fcmp.f64 pred"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_e4_f642i_nan_fails() {
+        // F642I: NaN → conversion error
+        let mut exec = E4Executor::default();
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::FImmF64 { dst: 0, imm: f64::NAN },
+                    Instruction::F642I { dst: 1, a: 0 },
+                    Instruction::Ret { dst: 1 },
+                ],
+            }],
+            memory: vec![0u8; 1024],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().unwrap().contains("conversion error"), "got: {}", result.error.as_ref().unwrap());
+    }
+
+    #[test]
+    fn test_e4_f642i_overflow_fails() {
+        // F642I: value > i32::MAX → conversion error
+        let mut exec = E4Executor::default();
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::FImmF64 { dst: 0, imm: (i32::MAX as f64) * 2.0 },
+                    Instruction::F642I { dst: 1, a: 0 },
+                    Instruction::Ret { dst: 1 },
+                ],
+            }],
+            memory: vec![0u8; 1024],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().unwrap().contains("conversion error"), "got: {}", result.error.as_ref().unwrap());
+    }
+
+    #[test]
+    fn test_e4_f642u_nan_fails() {
+        // F642U: NaN → conversion error
+        let mut exec = E4Executor::default();
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::FImmF64 { dst: 0, imm: f64::NAN },
+                    Instruction::F642U { dst: 1, a: 0 },
+                    Instruction::Ret { dst: 1 },
+                ],
+            }],
+            memory: vec![0u8; 1024],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().unwrap().contains("conversion error"), "got: {}", result.error.as_ref().unwrap());
+    }
+
+    #[test]
+    fn test_e4_f642u_negative_fails() {
+        // F642U: negative → conversion error
+        let mut exec = E4Executor::default();
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::FImmF64 { dst: 0, imm: -1.0 },
+                    Instruction::F642U { dst: 1, a: 0 },
+                    Instruction::Ret { dst: 1 },
+                ],
+            }],
+            memory: vec![0u8; 1024],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().unwrap().contains("conversion error"), "got: {}", result.error.as_ref().unwrap());
+    }
+
+    #[test]
+    fn test_e4_load_i64_oob_fails() {
+        // LoadI64 with address at memory boundary: 8 bytes from offset 65529 in 65536-byte memory
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(65529)); // OOB: 65529+8=65537 > 65536
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::HostCall { id: 0, args: vec![], results: vec![1] }, // r1 = 65529
+                    Instruction::LoadI64 { dst: 2, addr: 1 },
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![0u8; 65536],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().unwrap().contains("out of bounds"), "got: {}", result.error.as_ref().unwrap());
+    }
+
+    #[test]
+    fn test_e4_store_i64_oob_fails() {
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(65529)); // OOB: 65529+8=65537
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::HostCall { id: 0, args: vec![], results: vec![1] }, // r1 = 65529
+                    Instruction::HostCall { id: 0, args: vec![], results: vec![2] }, // r2 = 0
+                    Instruction::StoreI64 { addr: 1, src: 2 },
+                    Instruction::Ret { dst: 0 },
+                ],
+            }],
+            memory: vec![0u8; 65536],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().unwrap().contains("out of bounds"), "got: {}", result.error.as_ref().unwrap());
+    }
+
+    #[test]
+    fn test_e4_memcopy_oob_fails() {
+        // MemCopy: dst and src are register indices, size is immediate u32
+        // Use dst=0 (holds addr 65500), src=1 (holds addr 65500), size=100 (immediate)
+        // dst_addr=65500, src_addr=65500, size=100 → 65500+100 > 65536 → OOB
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(65500)); // id=0: returns 65500
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::HostCall { id: 0, args: vec![], results: vec![0] }, // r0 = 65500 (addr)
+                    Instruction::HostCall { id: 0, args: vec![], results: vec![1] }, // r1 = 65500 (addr)
+                    Instruction::MemCopy { dst: 0, src: 1, size: 100 }, // size=100 immediate, 65500+100 > 65536
+                    Instruction::Ret { dst: 0 },
+                ],
+            }],
+            memory: vec![0u8; 65536],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().unwrap().contains("out of bounds"), "got: {}", result.error.as_ref().unwrap());
+    }
+
+    #[test]
+    fn test_e4_memfill_oob_fails() {
+        // MemFill: addr from r0, value from r1, size=IMMEDIATE (not register)
+        // Use 16-byte memory, addr=10, size=10 (immediate) → 10+10=20 > 16 → OOB
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(10)); // id=0: addr
+        exec.host_functions_mut().register(|_args| E4Value::I32(1));  // id=1: value
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::HostCall { id: 0, args: vec![], results: vec![0] }, // r0 = 10 (addr)
+                    Instruction::HostCall { id: 1, args: vec![], results: vec![1] }, // r1 = 1 (value)
+                    Instruction::MemFill { addr: 0, value: 1, size: 10 }, // size=10 immediate, 10+10=20 > 16
+                    Instruction::Ret { dst: 0 },
+                ],
+            }],
+            memory: vec![0u8; 16],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().unwrap().contains("out of bounds"), "got: {}", result.error.as_ref().unwrap());
+    }
+
+    #[test]
+    fn test_e4_tablebr_invalid_index_fails() {
+        // TableBr: invalid table index
+        let mut exec = E4Executor::default();
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::TableBr { table_idx: 99, index: 0 }, // invalid table
+                    Instruction::Ret { dst: 0 },
+                ],
+            }],
+            memory: vec![0u8; 1024],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err(), "invalid table index should error");
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("invalid table"), "got: {}", err);
+    }
+
+    // === End error path tests ===
 }
