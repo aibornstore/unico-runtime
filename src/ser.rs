@@ -6748,8 +6748,6 @@ mod tests {
     #[test]
     fn test_ser_decode_binary_op_all_valid() {
         for idx in 0u32..=26 {
-            let encoded_idx = encode_binary_op(&crate::ir::U30BinaryOp::MinU32);
-            let decoded = decode_binary_op(idx).unwrap();
             // Just verify each index decodes to a valid variant
             let _ = decode_binary_op(idx).unwrap();
         }

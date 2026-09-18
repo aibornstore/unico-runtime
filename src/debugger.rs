@@ -9474,4 +9474,487 @@ mod tests {
         let r = dbg.run_to_completion();
         assert!(r.is_ok());
     }
+
+    #[test]
+    fn test_debugger_memgrow_bad_delta_type() {
+        // MemGrow with delta that is not U64 (F64)
+        let module = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 4096, readable: true, writable: true, initial: vec![] }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) }, // not U64
+                        U30Op::MemGrow { dst: 1, region: 0, delta: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_memsize_bad_region() {
+        // MemSize with nonexistent region
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemSize { dst: 0, region: 99 }, // nonexistent
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![0] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // Verification catches nonexistent region at construction
+        let r = U30Debugger::new(module, &[], 1000);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_call_args_not_defined() {
+        // Call with undefined argument register
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![U30Type::U64],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 1, value: U30Value::U64(0) }, // r1 defined
+                            U30Op::Call { function: 0, args: vec![999], results: vec![] }, // r999 undefined
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 0,
+        };
+        let r = U30Debugger::new(module, &[], 1000);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_tailcall_args_not_defined() {
+        // TailCall with undefined argument register
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![U30Type::U64],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 1, value: U30Value::U64(0) },
+                        ],
+                        terminator: U30Terminator::TailCall { function: 0, args: vec![999] }, // r999 undefined
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 0,
+        };
+        let r = U30Debugger::new(module, &[], 1000);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_indirectcall_bad_arg_type() {
+        // IndirectCall with wrong type for function register — verification doesn't catch type errors at call time
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) }, // F64, not U64
+                        U30Op::IndirectCall { function: 0, args: vec![], results: vec![] },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // Verification accepts it (type errors not caught at construction), execution would fail
+        let r = U30Debugger::new(module, &[], 1000);
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_debugger_tablebr_invalid_index_reg() {
+        // TableBr where index register contains wrong type
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![U30TableDecl { id: 0, targets: vec![1] }],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![
+                    U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::F64(0.0) }, // F64, not U64
+                            U30Op::TableBr { table: 0, index: 0 }, // reads r0 as index
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // Verification doesn't catch type errors in TableBr index — accepts but would fail at runtime
+        let r = U30Debugger::new(module, &[], 1000);
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_debugger_assert_failure() {
+        // Assert with false condition
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(false) },
+                        U30Op::Assert { cond: 0, msg: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_binary_invalid_a_reg() {
+        // Binary with undefined register 'a'
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 1, value: U30Value::U64(20) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::AddWrapU64, a: 999, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = U30Debugger::new(module, &[], 1000);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_binary_type_mismatch() {
+        // Binary with wrong types (U64 + F64)
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(1) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(2.0) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::AddWrapU64, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_indirectcall_result_reg_oob() {
+        // IndirectCall where result register is undefined (too high)
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![U30Type::U64],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![9999] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(1) },
+                            U30Op::IndirectCall { function: 0, args: vec![], results: vec![9999] },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 0,
+        };
+        let r = U30Debugger::new(module, &[], 1000);
+        assert!(r.is_ok()); // verify doesn't catch undefined result reg
+    }
+
+    #[test]
+    fn test_debugger_not_u8_wrong_type() {
+        // NotU8 with wrong type (F64)
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) },
+                        U30Op::NotU8 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_not_u16_wrong_type() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) },
+                        U30Op::NotU16 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_not_u32_wrong_type() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) },
+                        U30Op::NotU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_not_u64_wrong_type() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) },
+                        U30Op::NotU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_i2f_wrong_type() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) },
+                        U30Op::I2F { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_f2i_wrong_type() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(1) },
+                        U30Op::F2I { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_debugger_memcopy_oob_dst() {
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: vec![0; 16] },
+                U30RegionDecl { id: 1, size: 16, readable: true, writable: true, initial: vec![0; 16] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },  // src offset
+                        U30Op::Const { dst: 1, value: U30Value::U64(14) }, // dst offset OOB
+                        U30Op::Const { dst: 2, value: U30Value::U64(4) },  // size
+                        U30Op::MemCopy { dst_region: 1, dst_offset: 1, src_region: 0, src_offset: 0, size: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // Bounds checked at runtime, not at construction
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err()); // OOB: 14+4 = 18 > 16
+    }
+
+    #[test]
+    fn test_debugger_memfill_wrong_value_type() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: vec![0; 16] }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(42.0) }, // wrong type
+                        U30Op::MemFill { region: 0, offset: 0, value: 1, size: 10 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = U30Debugger::new(module, &[], 1000);
+        assert!(r.is_err());
+    }
 }
