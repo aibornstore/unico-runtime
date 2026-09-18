@@ -4290,6 +4290,188 @@ mod tests {
         assert!(err_msg.contains("not writable"));
     }
 
+    // Test StoreU8 with F64 value (type mismatch for as_u8)
+    #[test]
+    fn test_debugger_store_u8_f64_value_fails() {
+        let module = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 8,
+                readable: true,
+                writable: true,
+                initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(3.14) }, // F64, not u8
+                        U30Op::StoreU8 { region: 0, offset: 0, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+        let err_msg = format!("{}", r.unwrap_err());
+        assert!(err_msg.contains("expected"), "got: {}", err_msg);
+    }
+
+    // Test LoadU8 into F64 register (type mismatch for as_u8)
+    #[test]
+    fn test_debugger_load_u8_f64_dst_fails() {
+        let module = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 8,
+                readable: true,
+                writable: true,
+                initial: vec![0, 42, 0, 0, 0, 0, 0, 0],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::LoadU8 { dst: 1, region: 0, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        // The dst register type for LoadU8 should be U8 - if it's F64 it fails
+        // Currently LoadU8 stores into reg 1, and the default type is determined by the instruction
+        // Let's test that offset as_u64 error (offset is F64)
+        let module2 = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 8,
+                readable: true,
+                writable: true,
+                initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(0.0) }, // F64 offset
+                        U30Op::LoadU8 { dst: 1, region: 0, offset: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module2, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+        let err_msg = format!("{}", r.unwrap_err());
+        assert!(err_msg.contains("expected"), "got: {}", err_msg);
+    }
+
+    // Test mem_copy with non-readable source region
+    #[test]
+    fn test_debugger_memcopy_nonreadable_source() {
+        let module = U30Module {
+            regions: vec![
+                crate::ir::U30RegionDecl {
+                    id: 0,
+                    size: 16,
+                    readable: false,
+                    writable: true,
+                    initial: vec![0; 16],
+                },
+                crate::ir::U30RegionDecl {
+                    id: 1,
+                    size: 16,
+                    readable: true,
+                    writable: true,
+                    initial: vec![0; 16],
+                },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 2, value: U30Value::U64(4) },
+                        U30Op::MemCopy { dst_region: 1, dst_offset: 0, src_region: 0, src_offset: 0, size: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+        let err_msg = format!("{}", r.unwrap_err());
+        assert!(err_msg.contains("not readable"), "got: {}", err_msg);
+    }
+
+    // Test mem_copy with non-writable destination region
+    #[test]
+    fn test_debugger_memcopy_nonwritable_dest() {
+        let module = U30Module {
+            regions: vec![
+                crate::ir::U30RegionDecl {
+                    id: 0,
+                    size: 16,
+                    readable: true,
+                    writable: true,
+                    initial: vec![0xAB; 16],
+                },
+                crate::ir::U30RegionDecl {
+                    id: 1,
+                    size: 16,
+                    readable: true,
+                    writable: false,
+                    initial: vec![0; 16],
+                },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 2, value: U30Value::U64(4) },
+                        U30Op::MemCopy { dst_region: 1, dst_offset: 0, src_region: 0, src_offset: 0, size: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err());
+        let err_msg = format!("{}", r.unwrap_err());
+        assert!(err_msg.contains("not writable"), "got: {}", err_msg);
+    }
+
     // Test step on out-of-fuel
     #[test]
     fn test_debugger_out_of_fuel() {
