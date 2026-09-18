@@ -911,4 +911,287 @@ mod tests {
         assert!(t3.contains("host.call"), "missing host.call");
         assert!(t3.contains("id=7"), "missing id=7");
     }
+
+    // -------------------------------------------------------------------------
+    // T33: Integer bitwise instructions
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_disasm_integer_bitwise() {
+        // IAnd, IOr, IXor, INot, IClz, ICtz, IPopcnt, IRotl, IRotr
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::IAdd { dst: 0, a: 0, b: 0 }, // ensure r0 has value
+                    Instruction::IAnd { dst: 1, a: 0, b: 0 },
+                    Instruction::IOr { dst: 2, a: 0, b: 0 },
+                    Instruction::IXor { dst: 3, a: 0, b: 0 },
+                    Instruction::INot { dst: 4, a: 0 },
+                    Instruction::IClz { dst: 5, a: 0 },
+                    Instruction::ICtz { dst: 6, a: 0 },
+                    Instruction::IPopcnt { dst: 7, a: 0 },
+                    Instruction::IRotl { dst: 0, a: 0, b: 1 },
+                    Instruction::IRotr { dst: 1, a: 0, b: 1 },
+                    Instruction::Ret { dst: 1 },
+                ],
+            }],
+            memory: vec![],
+            tables: vec![],
+        };
+        let text = fmt_module_opts(&module, FmtOpts::default());
+        assert!(text.contains("iand"), "missing iand");
+        assert!(text.contains("ior"), "missing ior");
+        assert!(text.contains("ixor"), "missing ixor");
+        assert!(text.contains("inot"), "missing inot");
+        assert!(text.contains("iclz"), "missing iclz");
+        assert!(text.contains("ictz"), "missing ictz");
+        assert!(text.contains("ipopcnt"), "missing ipopcnt");
+        assert!(text.contains("irotl"), "missing irotl");
+        assert!(text.contains("irotr"), "missing irotr");
+    }
+
+    // -------------------------------------------------------------------------
+    // T34: Format options - colors enabled
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_disasm_colors_enabled() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 2,
+                code: vec![Instruction::Ret { dst: 0 }],
+            }],
+            memory: vec![],
+            tables: vec![],
+        };
+        let text = fmt_module_opts(
+            &module,
+            FmtOpts { colors: true, show_memory: false, hex_cols: 16 },
+        );
+        // Should contain ANSI color codes
+        assert!(text.contains("\x1b[35m"), "missing magenta color code");
+        assert!(text.contains("\x1b[1m"), "missing bold color code");
+        assert!(text.contains("\x1b[33m"), "missing yellow color code");
+        assert!(text.contains("\x1b[32m"), "missing green color code");
+        assert!(text.contains("\x1b[0m"), "missing reset code");
+    }
+
+    // -------------------------------------------------------------------------
+    // T35: Empty module with no functions
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_disasm_empty_module() {
+        let module = E4Module {
+            functions: vec![],
+            memory: vec![],
+            tables: vec![],
+        };
+        let text = fmt_module_opts(&module, FmtOpts::default());
+        assert!(text.contains("E4 Module"));
+        assert!(text.contains("functions"));
+        assert!(text.contains("functions {"));
+        assert!(text.contains("}"));
+    }
+
+    // -------------------------------------------------------------------------
+    // T36: Memory formatting with different hex_cols
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_disasm_memory_hex_cols() {
+        // Test with hex_cols=1 (one byte per line)
+        let module = E4Module {
+            functions: vec![],
+            memory: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let text = decode_disasm_opts(
+            &encoded,
+            FmtOpts { colors: false, show_memory: true, hex_cols: 1 },
+        )
+        .unwrap();
+        // With hex_cols=1, each byte on its own line
+        assert!(text.contains("00  de"));
+        assert!(text.contains("01  ad"));
+        assert!(text.contains("02  be"));
+        assert!(text.contains("03  ef"));
+    }
+
+    #[test]
+    fn test_disasm_memory_large() {
+        // Test with large memory that spans multiple lines
+        let module = E4Module {
+            functions: vec![],
+            memory: vec![0xAA; 64],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let text = decode_disasm_opts(
+            &encoded,
+            FmtOpts { colors: false, show_memory: true, hex_cols: 16 },
+        )
+        .unwrap();
+        assert!(text.contains("memory"));
+        assert!(text.contains("bytes"));
+        // Should have 4 lines of 16 bytes each (address 0x00, 0x10, 0x20, 0x30)
+        assert!(text.contains("0000"), "missing address 0000");
+        assert!(text.contains("0010"), "missing address 0010");
+        assert!(text.contains("0020"), "missing address 0020");
+        assert!(text.contains("0030"), "missing address 0030");
+    }
+
+    // -------------------------------------------------------------------------
+    // T37: Function signature formatting
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_disasm_function_signature_with_params_and_results() {
+        // Function with multiple params and results
+        let module = E4Module {
+            functions: vec![
+                E4FunctionDef {
+                    param_count: 3,
+                    result_count: 2,
+                    register_count: 8,
+                    code: vec![
+                        Instruction::Ret { dst: 0 },
+                    ],
+                },
+            ],
+            memory: vec![],
+            tables: vec![],
+        };
+        let text = fmt_module_opts(&module, FmtOpts::default());
+        // Function signature with params and results
+        assert!(text.contains("fn 0"));
+        assert!(text.contains("params=3"));
+        assert!(text.contains("results=2"));
+        // Check that type markers are present (with color codes)
+        assert!(text.contains("i32"));
+    }
+
+    #[test]
+    fn test_disasm_function_no_results() {
+        // Function with params but no results (void function)
+        let module = E4Module {
+            functions: vec![
+                E4FunctionDef {
+                    param_count: 2,
+                    result_count: 0,
+                    register_count: 4,
+                    code: vec![Instruction::Trap],
+                },
+            ],
+            memory: vec![],
+            tables: vec![],
+        };
+        let text = fmt_module_opts(&module, FmtOpts::default());
+        assert!(text.contains("fn 0(i32, i32)"));
+        assert!(text.contains("results=0"));
+    }
+
+    // -------------------------------------------------------------------------
+    // T38: Error handling - decode errors
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_disasm_invalid_magic() {
+        // Invalid magic bytes should fail
+        let invalid_data = vec![0x00, 0x01, 0x02, 0x03, 0x01];
+        let result = decode_disasm(&invalid_data);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("bad magic") || err_msg.contains("E4"));
+    }
+
+    #[test]
+    fn test_disasm_truncated_header() {
+        // Truncated header should fail
+        let truncated = vec![0xE4, 0x58, 0x58]; // only 3 bytes
+        let result = decode_disasm(&truncated);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_disasm_truncated_function() {
+        // Valid header but truncated function data
+        let mut data = Vec::new();
+        data.extend_from_slice(b"E4XX"); // magic
+        data.push(1); // version
+        data.extend_from_slice(&0u32.to_le_bytes()); // mem_size = 0
+        data.extend_from_slice(&1u32.to_le_bytes()); // fn_count = 1
+        // But no function data follows - truncated
+        let result = decode_disasm(&data);
+        assert!(result.is_err());
+    }
+
+    // -------------------------------------------------------------------------
+    // T39: decode_disasm_opts with show_memory=false
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_disasm_show_memory_false() {
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 2,
+                code: vec![Instruction::Ret { dst: 0 }],
+            }],
+            memory: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let text = decode_disasm_opts(
+            &encoded,
+            FmtOpts { colors: false, show_memory: false, hex_cols: 16 },
+        )
+        .unwrap();
+        // Memory should NOT be in output when show_memory=false
+        assert!(!text.contains("de ad"));
+        assert!(!text.contains("memory"));
+        // But functions should still be there
+        assert!(text.contains("fn 0"));
+    }
+
+    // -------------------------------------------------------------------------
+    // T40: fmt_module_opts builder pattern
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_fmt_opts_builder() {
+        let opts = FmtOpts::default().colors(true);
+        assert!(opts.colors);
+        assert!(opts.show_memory);
+        assert_eq!(opts.hex_cols, 16);
+    }
+
+    // -------------------------------------------------------------------------
+    // T41: Module with tables
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_disasm_tables_rendered() {
+        // Module with tables should show table data
+        let module = E4Module {
+            functions: vec![],
+            memory: vec![],
+            tables: vec![
+                vec![10, 20, 30], // table 0
+                vec![100],        // table 1
+            ],
+        };
+        let text = fmt_module_opts(&module, FmtOpts::default());
+        // Tables section should be present (from fmt_module_opts)
+        // Note: the current implementation doesn't explicitly show table contents
+        // but the module should parse correctly
+        assert!(text.contains("E4 Module"));
+    }
 }

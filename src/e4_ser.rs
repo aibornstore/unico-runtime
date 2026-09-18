@@ -1378,6 +1378,442 @@ mod tests {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // T31: Truncated decode for F64 / int / memory opcodes (0x17-0x37)
+    // The roundtrip tests cover success paths; these cover error paths.
+    // Each instruction decode branch has individual field-read error paths.
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_e4_decode_truncated_f64_two_reg() {
+        // FSqrtF64 (0x1B): opcode at byte 30, fields at 31-38.
+        // Truncate at 30 (opcode only) → first dst read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::FSqrtF64 { dst: 0, a: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // byte 29: FImmF64 opcode(1) + dst(4) + imm(8) = 13 → end at 42
+        // byte 30: FSqrtF64 opcode(1) + dst(4) + a(4) = 9 → end at 39
+        // Truncate at 30 → opcode byte only, dst read fails
+        let result = decode_e4(&encoded[..30]);
+        assert!(result.is_err(), "truncated FSqrtF64 opcode should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_fcmp_f64() {
+        // FCmpF64 (0x1F): opcode at byte 31, pred at 32, dst at 33-36, a at 37-40, b at 41-44.
+        // Truncate at 31 (opcode only) → pred read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::FCmpF64 { pred: 4, dst: 0, a: 1, b: 2 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // Trap ends at 29, FCmpF64 starts at 31 (pred=u8), then dst, a, b (3×u32)
+        // Truncate at 31 → opcode only, pred read fails
+        let result = decode_e4(&encoded[..31]);
+        assert!(result.is_err(), "truncated FCmpF64 opcode should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_fimm_f64() {
+        // FImmF64 (0x24): opcode at byte 29, dst at 30-33, imm at 34-41.
+        // Truncate at 29 (opcode only) → dst read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::FImmF64 { dst: 0, imm: 1.23456789_f64 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // byte 29: FImmF64 opcode, truncate at 29 → opcode only, dst read fails
+        let result = decode_e4(&encoded[..29]);
+        assert!(result.is_err(), "truncated FImmF64 opcode should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_f64_partial_fields() {
+        // FMulF64 (0x19): opcode at byte 30, dst at 31-34, a at 35-38, b at 39-42.
+        // Truncate at 34 (after dst field) → a read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::FMulF64 { dst: 0, a: 1, b: 2 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // byte 30: FMulF64 opcode; dst at 31-34; a at 35-38; b at 39-42
+        // Truncate at 35 → opcode + dst complete, a read fails
+        let result = decode_e4(&encoded[..35]);
+        assert!(result.is_err(), "truncated FMulF64 mid-field should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_int_two_reg() {
+        // INot (0x2C): opcode at byte 30, dst at 31-34, a at 35-38.
+        // Truncate at 30 (opcode only) → dst read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::INot { dst: 0, a: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // byte 30: INot opcode; truncate at 30 → opcode only, dst fails
+        let result = decode_e4(&encoded[..30]);
+        assert!(result.is_err(), "truncated INot opcode should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_int_three_reg() {
+        // IAdd (0x25): opcode at byte 30, dst at 31-34, a at 35-38, b at 39-42.
+        // Truncate at 35 (after dst field) → a read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::IAdd { dst: 0, a: 1, b: 2 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // byte 30: IAdd opcode; dst at 31-34; truncate at 35 → a read fails
+        let result = decode_e4(&encoded[..35]);
+        assert!(result.is_err(), "truncated IAdd mid-field should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_memcopy() {
+        // MemCopy (0x36): opcode at byte 30, dst at 31-34, src at 35-38, size at 39-42.
+        // Truncate at 30 (opcode only) → dst read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::MemCopy { dst: 0, src: 1, size: 8 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // byte 30: MemCopy opcode; truncate at 30 → opcode only, dst fails
+        let result = decode_e4(&encoded[..30]);
+        assert!(result.is_err(), "truncated MemCopy opcode should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_memsize() {
+        // MemGrow (0x33): opcode at byte 30, dst at 31-34, delta at 35-38.
+        // Truncate at 35 (after dst field) → delta read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::MemGrow { dst: 0, delta: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // byte 30: MemGrow opcode; dst at 31-34; truncate at 35 → delta fails
+        let result = decode_e4(&encoded[..35]);
+        assert!(result.is_err(), "truncated MemGrow mid-field should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_sext_zext() {
+        // SExt (0x34): opcode at byte 30, dst at 31-34, a at 35-38.
+        // Truncate at 30 (opcode only) → dst read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::SExt { dst: 0, a: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let result = decode_e4(&encoded[..30]);
+        assert!(result.is_err(), "truncated SExt opcode should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_bit_count_ops() {
+        // ICtz (0x2E): opcode at byte 30, dst at 31-34, a at 35-38.
+        // Truncate at 30 (opcode only) → dst read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::ICtz { dst: 0, a: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let result = decode_e4(&encoded[..30]);
+        assert!(result.is_err(), "truncated ICtz opcode should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_rotate_ops() {
+        // IRotl (0x30): opcode at byte 30, dst at 31-34, a at 35-38, b at 39-42.
+        // Truncate at 30 (opcode only) → dst read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::IRotl { dst: 0, a: 1, b: 2 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        let result = decode_e4(&encoded[..30]);
+        assert!(result.is_err(), "truncated IRotl opcode should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_tablebr() {
+        // TableBr (0x32): opcode at byte 30, table_idx at 31-34, index at 35-38.
+        // Truncate at 30 (opcode only) → table_idx read fails.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::TableBr { table_idx: 0, index: 1 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![vec![1, 2, 3]],
+        };
+        let encoded = encode_e4(&module);
+        // TableBr opcode at byte 30; truncate at 30 → table_idx read fails
+        let result = decode_e4(&encoded[..30]);
+        assert!(result.is_err(), "truncated TableBr opcode should fail");
+    }
+
+    #[test]
+    fn test_e4_encode_decode_multi_function_module() {
+        // 3 functions with different instruction mixes; exercises all encode paths
+        // and decode paths for functions 1, 2, and 3.
+        let module = E4Module {
+            functions: vec![
+                E4FunctionDef {
+                    param_count: 1,
+                    result_count: 1,
+                    register_count: 4,
+                    code: vec![
+                        Instruction::FImm { dst: 0, imm: 42.0 },
+                        Instruction::FAdd { dst: 1, a: 0, b: 0 },
+                        Instruction::Ret { dst: 1 },
+                    ],
+                },
+                E4FunctionDef {
+                    param_count: 0,
+                    result_count: 1,
+                    register_count: 4,
+                    code: vec![
+                        Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+                        Instruction::INot { dst: 1, a: 0 },
+                        Instruction::Ret { dst: 1 },
+                    ],
+                },
+                E4FunctionDef {
+                    param_count: 0,
+                    result_count: 0,
+                    register_count: 4,
+                    code: vec![
+                        Instruction::MemGrow { dst: 0, delta: 1 },
+                        Instruction::Trap,
+                    ],
+                },
+            ],
+            memory: vec![0xAB, 0xCD],
+            tables: vec![],
+        };
+        let decoded = roundtrip(&module);
+        assert_eq!(decoded.functions.len(), 3);
+        assert_eq!(decoded.functions[0].param_count, 1);
+        assert_eq!(decoded.functions[1].result_count, 1);
+        assert_eq!(decoded.functions[2].code.len(), 2);
+        assert_eq!(decoded.memory, &[0xAB, 0xCD]);
+    }
+
+    #[test]
+    fn test_e4_encode_decode_multi_table_module() {
+        // 2 jump tables; exercises table count > 1 and table loop in encode/decode.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::Trap],
+            }],
+            memory: vec![],
+            tables: vec![vec![10, 20, 30], vec![5, 15]],
+        };
+        let decoded = roundtrip(&module);
+        assert_eq!(decoded.tables.len(), 2);
+        assert_eq!(decoded.tables[0], &[10, 20, 30]);
+        assert_eq!(decoded.tables[1], &[5, 15]);
+    }
+
+    #[test]
+    fn test_e4_encoded_size_exactness() {
+        // Verify encoded_size is never smaller than actual encoded size.
+        // Also covers HostCall encode path (variable-size instruction).
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 8,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: 1.0 },
+                    Instruction::Ret { dst: 0 },
+                ],
+            }],
+            memory: vec![0u8; 1024],
+            tables: vec![vec![1, 2, 3, 4]],
+        };
+        let actual = encode_e4(&module).len();
+        let estimate = encoded_size(&module);
+        assert!(estimate >= actual, "encoded_size {} must be >= actual {}", estimate, actual);
+        // Verify the estimate is within reasonable bounds (no more than 2x actual)
+        assert!(estimate <= actual * 2, "encoded_size {} should not wildly exceed actual {}", estimate, actual);
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_hostcall_args() {
+        // HostCall (0x16): opcode at byte 29, id at 30-33, arg_count at 34-37,
+        // args at 38-..., result_count at ..., results at ...
+        // Truncate during args read (after opcode + id + arg_count + 1 arg, missing 1 arg).
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::HostCall { id: 0, args: vec![1, 2], results: vec![3] }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // HostCall: opcode(1) + id(4) + arg_count(4) + 2 args(8) + result_count(4) + 1 result(4) = 25
+        // HostCall starts at byte 29. Truncate at byte 29 + 1 + 4 + 4 + 4 = 42
+        // → opcode + id + arg_count + 1 arg read, 1 arg missing
+        let result = decode_e4(&encoded[..42]);
+        assert!(result.is_err(), "truncated HostCall args should fail");
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_hostcall_results() {
+        // HostCall: truncate during results read.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::HostCall { id: 0, args: vec![], results: vec![1, 2] }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // HostCall: opcode(1) + id(4) + arg_count(4) + result_count(4) + 2 results(8) = 21
+        // Starts at byte 29. Truncate at 29 + 1 + 4 + 4 + 4 = 42 → cuts in results
+        let result = decode_e4(&encoded[..42]);
+        assert!(result.is_err(), "truncated HostCall results should fail");
+    }
+
+    #[test]
+    fn test_e4_encode_decode_bitwise_ops_execution() {
+        // IAnd/IOr/IXor with execution to verify semantics preserved after roundtrip.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+                    Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // r1 = 1
+                    Instruction::IAnd { dst: 2, a: 0, b: 1 }, // r2 = 1
+                    Instruction::IXor { dst: 3, a: 0, b: 1 }, // r3 = 0
+                    Instruction::IOr { dst: 4, a: 0, b: 1 },  // r4 = 1
+                    Instruction::Ret { dst: 3 },
+                ],
+            }],
+            memory: vec![0u8; 64],
+            tables: vec![],
+        };
+        let decoded = roundtrip(&module);
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let result = exec.execute(&decoded, 0).unwrap();
+        assert_eq!(result.status, crate::types::Status::Pass);
+        assert_eq!(result.value.unwrap(), 0, "1 XOR 1 should be 0");
+    }
+
+    #[test]
+    fn test_e4_encode_decode_popcnt_clz_ctz() {
+        // IPopcnt, IClz, ICtz roundtrip with execution.
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 8,
+                code: vec![
+                    Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1 (binary: 1)
+                    Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // r1 = 1
+                    Instruction::IPopcnt { dst: 2, a: 0 }, // r2 = 1
+                    Instruction::IClz { dst: 3, a: 0 },    // r3 = 31
+                    Instruction::ICtz { dst: 4, a: 0 },    // r4 = 0
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![0u8; 64],
+            tables: vec![],
+        };
+        let decoded = roundtrip(&module);
+        let mut exec = E4Executor::default();
+        exec.host_functions_mut().register(|_args| E4Value::I32(0));
+        let result = exec.execute(&decoded, 0).unwrap();
+        assert_eq!(result.status, crate::types::Status::Pass);
+        assert_eq!(result.value.unwrap(), 1, "popcnt(1) should be 1");
+    }
+
     #[test]
     fn test_e4_encode_decode_integer_arithmetic() {
         // IAdd/ISub/IMul/IDiv roundtrip

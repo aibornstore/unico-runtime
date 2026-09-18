@@ -4550,6 +4550,1055 @@ mod tests {
         assert!(decoded.regions[0].initial.iter().all(|&b| b == 0xAB));
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // Additional roundtrip / coverage tests added for +1-2% coverage
+    // ─────────────────────────────────────────────────────────────────
+
+    /// Test every U30Op variant encode→decode roundtrip with explicit assertions.
+    /// Covers decode_op variants 0-95 that may not have dedicated tests.
+    #[test]
+    fn test_ser_all_op_variants_decode_roundtrip() {
+
+        let cases: Vec<(&str, U30Op)> = vec![
+            // 0: Nop
+            ("Nop", U30Op::Nop),
+            // 1: Const (tested separately below)
+            // 2: Binary (tested via test_ser_all_binary_ops_roundtrip)
+            // 3: Select
+            ("Select", U30Op::Select { dst: 0, cond: 1, a: 2, b: 3 }),
+            // 4-7: Not variants
+            ("NotU8",  U30Op::NotU8  { dst: 0, src: 1 }),
+            ("NotU16", U30Op::NotU16 { dst: 0, src: 1 }),
+            ("NotU32", U30Op::NotU32 { dst: 0, src: 1 }),
+            ("NotU64", U30Op::NotU64 { dst: 0, src: 1 }),
+            // 8-9: Conversion
+            ("I2F",  U30Op::I2F  { dst: 0, src: 1 }),
+            ("F2I",  U30Op::F2I  { dst: 0, src: 1 }),
+            // 10-12: Reinterpret
+            ("TruncF32U64",       U30Op::TruncF32U64       { dst: 0, src: 1 }),
+            ("ReinterpretF32U32", U30Op::ReinterpretF32U32 { dst: 0, src: 1 }),
+            ("ReinterpretU32F32", U30Op::ReinterpretU32F32 { dst: 0, src: 1 }),
+            // 13-14: Abs
+            ("AbsU64", U30Op::AbsU64 { dst: 0, src: 1 }),
+            ("AbsU32", U30Op::AbsU32 { dst: 0, src: 1 }),
+            // 15-16: Neg
+            ("NegU64", U30Op::NegU64 { dst: 0, src: 1 }),
+            ("NegU32", U30Op::NegU32 { dst: 0, src: 1 }),
+            // 17-22: bit count
+            ("CtzU64",   U30Op::CtzU64   { dst: 0, src: 1 }),
+            ("CtzU32",   U30Op::CtzU32   { dst: 0, src: 1 }),
+            ("ClzU64",   U30Op::ClzU64   { dst: 0, src: 1 }),
+            ("ClzU32",   U30Op::ClzU32   { dst: 0, src: 1 }),
+            ("PopcntU64", U30Op::PopcntU64 { dst: 0, src: 1 }),
+            ("PopcntU32", U30Op::PopcntU32 { dst: 0, src: 1 }),
+            // 23-26: Rot
+            ("RotlU64", U30Op::RotlU64 { dst: 0, val: 1, sh: 2 }),
+            ("RotlU32", U30Op::RotlU32 { dst: 0, val: 1, sh: 2 }),
+            ("RotrU64", U30Op::RotrU64 { dst: 0, val: 1, sh: 2 }),
+            ("RotrU32", U30Op::RotrU32 { dst: 0, val: 1, sh: 2 }),
+            // 27-31: F32 cmp (tested in test_ser_encode_decode_f32_cmp_ops)
+            // 32-40: F32 arith (tested in test_ser_encode_decode_f32_arith_ops)
+            // 41-49: ZExt / Trunc
+            ("ZExtI8U16",  U30Op::ZExtI8U16  { dst: 0, src: 1 }),
+            ("ZExtI8U32",  U30Op::ZExtI8U32  { dst: 0, src: 1 }),
+            ("ZExtI8U64",  U30Op::ZExtI8U64  { dst: 0, src: 1 }),
+            ("ZExtI16U32", U30Op::ZExtI16U32 { dst: 0, src: 1 }),
+            ("ZExtI16U64", U30Op::ZExtI16U64 { dst: 0, src: 1 }),
+            ("ZExtI32U64", U30Op::ZExtI32U64 { dst: 0, src: 1 }),
+            ("TruncU64U32", U30Op::TruncU64U32 { dst: 0, src: 1 }),
+            ("TruncU64U16", U30Op::TruncU64U16 { dst: 0, src: 1 }),
+            ("TruncU32U16", U30Op::TruncU32U16 { dst: 0, src: 1 }),
+            // 52-53: Memory
+            ("MemSize", U30Op::MemSize { dst: 0, region: 1 }),
+            ("MemGrow", U30Op::MemGrow { dst: 0, region: 1, delta: 2 }),
+            // 68-73: F64 conversions
+            ("I64F64",            U30Op::I64F64            { dst: 0, src: 1 }),
+            ("F64I64",            U30Op::F64I64            { dst: 0, src: 1 }),
+            ("F32F64",            U30Op::F32F64            { dst: 0, src: 1 }),
+            ("F64F32",            U30Op::F64F32            { dst: 0, src: 1 }),
+            ("ReinterpretF64U64", U30Op::ReinterpretF64U64 { dst: 0, src: 1 }),
+            ("ReinterpretU64F64", U30Op::ReinterpretU64F64 { dst: 0, src: 1 }),
+            // 74-79: SExt
+            ("SExtI8U16",  U30Op::SExtI8U16  { dst: 0, src: 1 }),
+            ("SExtI8U32",  U30Op::SExtI8U32  { dst: 0, src: 1 }),
+            ("SExtI8U64",  U30Op::SExtI8U64  { dst: 0, src: 1 }),
+            ("SExtI16U32", U30Op::SExtI16U32 { dst: 0, src: 1 }),
+            ("SExtI16U64", U30Op::SExtI16U64 { dst: 0, src: 1 }),
+            ("SExtI32U64", U30Op::SExtI32U64 { dst: 0, src: 1 }),
+            // 80-82: ByteSwap
+            ("ByteSwapU16", U30Op::ByteSwapU16 { dst: 0, src: 1 }),
+            ("ByteSwapU32", U30Op::ByteSwapU32 { dst: 0, src: 1 }),
+            ("ByteSwapU64", U30Op::ByteSwapU64 { dst: 0, src: 1 }),
+            // 85-95: Memory + br
+            ("TableBr",  U30Op::TableBr  { table: 0, index: 1 }),
+            ("Break",    U30Op::Break    { code: 99 }),
+            ("Assert",   U30Op::Assert   { cond: 0, msg: 1 }),
+            ("LoadU8",   U30Op::LoadU8   { dst: 0, region: 1, offset: 2 }),
+            ("StoreU8",  U30Op::StoreU8  { region: 0, offset: 1, src: 2 }),
+            ("LoadU16",  U30Op::LoadU16  { dst: 0, region: 1, offset: 2 }),
+            ("StoreU16", U30Op::StoreU16 { region: 0, offset: 1, src: 2 }),
+            ("LoadU32",  U30Op::LoadU32  { dst: 0, region: 1, offset: 2 }),
+            ("StoreU32", U30Op::StoreU32 { region: 0, offset: 1, src: 2 }),
+            ("LoadU64",  U30Op::LoadU64  { dst: 0, region: 1, offset: 2 }),
+            ("StoreU64", U30Op::StoreU64 { region: 0, offset: 1, src: 2 }),
+        ];
+
+        for (name, op) in cases {
+            let module = U30Module {
+                regions: vec![],
+                tables: vec![],
+                functions: vec![U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![op.clone()],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                }],
+                entry_function: 0,
+            };
+            let encoded = encode(&module);
+            let decoded = decode(&encoded)
+                .unwrap_or_else(|e| panic!("decode failed for {}: {}", name, e));
+            let got = &decoded.functions[0].blocks[0].ops[0];
+            assert_eq!(got, &op, "roundtrip mismatch for {}", name);
+        }
+    }
+
+    /// Test every U30Value variant decode via decode_value.
+    #[test]
+    fn test_ser_decode_value_all_variants() {
+        // Bool (type 0)
+        let got = {
+            let buf = vec![0, 1];
+            let mut pos = 0;
+            decode_value(&buf, &mut pos).unwrap()
+        };
+        assert!(matches!(got, U30Value::Bool(true)));
+
+        // U8 (type 1)
+        let got = {
+            let buf = vec![1, 99];
+            let mut pos = 0;
+            decode_value(&buf, &mut pos).unwrap()
+        };
+        assert!(matches!(got, U30Value::U8(99)));
+
+        // U16 (type 2) — full 2 bytes
+        let got = {
+            let buf = vec![2, 0x34, 0x12];
+            let mut pos = 0;
+            decode_value(&buf, &mut pos).unwrap()
+        };
+        assert!(matches!(got, U30Value::U16(0x1234)));
+
+        // U32 (type 3) — full 4 bytes
+        let got = {
+            let buf = vec![3, 0x78, 0x56, 0x34, 0x12];
+            let mut pos = 0;
+            decode_value(&buf, &mut pos).unwrap()
+        };
+        assert!(matches!(got, U30Value::U32(0x12345678)));
+
+        // F32 (type 5) — full 4 bytes
+        let got = {
+            let bits: u32 = 0x40490FDBu32; // 3.14159
+            let mut buf = vec![5];
+            buf.extend_from_slice(&bits.to_le_bytes());
+            let mut pos = 0;
+            decode_value(&buf, &mut pos).unwrap()
+        };
+        assert!(matches!(got, U30Value::F32(f) if f.to_bits() == 0x40490FDBu32));
+    }
+
+    /// Test every U30Type variant encode→decode.
+    #[test]
+    fn test_ser_decode_type_all_variants() {
+        // Build a minimal module and replace params/results with each type
+        for (idx, ty) in [
+            (0u8, U30Type::Bool),
+            (1,   U30Type::U8),
+            (2,   U30Type::U16),
+            (3,   U30Type::U32),
+            (4,   U30Type::U64),
+            (5,   U30Type::F32),
+            (6,   U30Type::F64),
+        ] {
+            // Verify encode_type / decode_type roundtrip
+            let module = U30Module {
+                regions: vec![],
+                tables: vec![],
+                functions: vec![U30Function {
+                    params: vec![ty.clone()],
+                    results: vec![ty.clone()],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![0] },
+                    }],
+                    entry_block: 0,
+                }],
+                entry_function: 0,
+            };
+            let decoded = decode(&encode(&module)).unwrap();
+            assert_eq!(decoded.functions[0].params[0], ty, "type idx {} failed", idx);
+            assert_eq!(decoded.functions[0].results[0], ty, "type idx {} failed", idx);
+        }
+    }
+
+    /// Test decode_type error path for unknown variant.
+    #[test]
+    fn test_ser_decode_type_unknown_variant() {
+        let buf = vec![99]; // unknown type
+        let mut pos = 0;
+        let err = decode_type(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("unknown type"), "got: {}", err);
+    }
+
+    /// Test decode_terminator variant 4 (Trap) explicit decode.
+    #[test]
+    fn test_ser_decode_terminator_trap() {
+        let buf = vec![4, 77, 0, 0, 0]; // variant=4, code=77
+        let mut pos = 0;
+        let t = decode_terminator(&buf, &mut pos).unwrap();
+        assert!(matches!(t, U30Terminator::Trap { code: 77 }));
+    }
+
+    /// Test decode_op: truncated after Select fields (variant 3, partial)
+    #[test]
+    fn test_ser_decode_op_truncated_select() {
+        // Variant 3 (Select): needs dst(4) + cond(4) + a(4) + b(4) = 16 bytes after variant
+        let buf = vec![3, 0, 0, 0, 0, 1, 0, 0, 0, 2]; // 10 bytes total, need 4 more
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: truncated after NotU8 field (variant 4, partial)
+    #[test]
+    fn test_ser_decode_op_truncated_notu8() {
+        // Variant 4 (NotU8): needs dst(4) + src(4) = 8 bytes after variant
+        let buf = vec![4, 0, 0, 0, 0]; // 5 bytes total, need 4 more
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: variant 86 (Break) explicit decode.
+    #[test]
+    fn test_ser_decode_op_break() {
+        let buf = vec![86, 42, 0, 0, 0]; // variant=86, code=42
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Break { code: 42 }));
+    }
+
+    /// Test decode_op: variant 87 (Assert) explicit decode.
+    #[test]
+    fn test_ser_decode_op_assert() {
+        let buf = vec![87, 5, 0, 0, 0, 7, 0, 0, 0]; // variant=87, cond=5, msg=7
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Assert { cond: 5, msg: 7 }));
+    }
+
+    /// Test decode_op: variant 88 (LoadU8) explicit decode.
+    #[test]
+    fn test_ser_decode_op_loadu8() {
+        let mut buf = vec![88];
+        buf.extend_from_slice(&1u32.to_le_bytes()); // dst=1
+        buf.extend_from_slice(&2u32.to_le_bytes()); // region=2
+        buf.extend_from_slice(&3u32.to_le_bytes()); // offset=3
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::LoadU8 { dst: 1, region: 2, offset: 3 }));
+    }
+
+    /// Test decode_op: variant 89 (StoreU8) explicit decode.
+    #[test]
+    fn test_ser_decode_op_storeu8() {
+        let mut buf = vec![89];
+        buf.extend_from_slice(&0u32.to_le_bytes()); // region=0
+        buf.extend_from_slice(&4u32.to_le_bytes()); // offset=4
+        buf.extend_from_slice(&5u32.to_le_bytes()); // src=5
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::StoreU8 { region: 0, offset: 4, src: 5 }));
+    }
+
+    /// Test decode_op: variant 90 (LoadU16) explicit decode.
+    #[test]
+    fn test_ser_decode_op_loadu16() {
+        let mut buf = vec![90];
+        buf.extend_from_slice(&1u32.to_le_bytes());
+        buf.extend_from_slice(&2u32.to_le_bytes());
+        buf.extend_from_slice(&3u32.to_le_bytes());
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::LoadU16 { dst: 1, region: 2, offset: 3 }));
+    }
+
+    /// Test decode_op: variant 91 (StoreU16) explicit decode.
+    #[test]
+    fn test_ser_decode_op_storeu16() {
+        let mut buf = vec![91];
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.extend_from_slice(&4u32.to_le_bytes());
+        buf.extend_from_slice(&5u32.to_le_bytes());
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::StoreU16 { region: 0, offset: 4, src: 5 }));
+    }
+
+    /// Test decode_op: variant 92 (LoadU32) explicit decode.
+    #[test]
+    fn test_ser_decode_op_loadu32() {
+        let mut buf = vec![92];
+        buf.extend_from_slice(&1u32.to_le_bytes());
+        buf.extend_from_slice(&2u32.to_le_bytes());
+        buf.extend_from_slice(&3u32.to_le_bytes());
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::LoadU32 { dst: 1, region: 2, offset: 3 }));
+    }
+
+    /// Test decode_op: variant 93 (StoreU32) explicit decode.
+    #[test]
+    fn test_ser_decode_op_storeu32() {
+        let mut buf = vec![93];
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.extend_from_slice(&4u32.to_le_bytes());
+        buf.extend_from_slice(&5u32.to_le_bytes());
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::StoreU32 { region: 0, offset: 4, src: 5 }));
+    }
+
+    /// Test decode_op: variant 94 (LoadU64) explicit decode.
+    #[test]
+    fn test_ser_decode_op_loadu64() {
+        let mut buf = vec![94];
+        buf.extend_from_slice(&1u32.to_le_bytes());
+        buf.extend_from_slice(&2u32.to_le_bytes());
+        buf.extend_from_slice(&3u32.to_le_bytes());
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::LoadU64 { dst: 1, region: 2, offset: 3 }));
+    }
+
+    /// Test decode_op: variant 95 (StoreU64) explicit decode.
+    #[test]
+    fn test_ser_decode_op_storeu64() {
+        let mut buf = vec![95];
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.extend_from_slice(&4u32.to_le_bytes());
+        buf.extend_from_slice(&5u32.to_le_bytes());
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::StoreU64 { region: 0, offset: 4, src: 5 }));
+    }
+
+    /// Test decode_op: truncated at TableBr fields (variant 85, partial)
+    #[test]
+    fn test_ser_decode_op_truncated_tablebr() {
+        let buf = vec![85, 0, 0, 0, 0]; // variant + dst=0, missing index
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: truncated at Break (variant 86, partial)
+    #[test]
+    fn test_ser_decode_op_truncated_break() {
+        let buf = vec![86]; // variant only, missing code
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: truncated at Assert (variant 87, partial)
+    #[test]
+    fn test_ser_decode_op_truncated_assert() {
+        let buf = vec![87, 0, 0, 0, 0]; // variant + cond=0, missing msg
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: truncated at LoadU8 (variant 88, partial)
+    #[test]
+    fn test_ser_decode_op_truncated_loadu8() {
+        let buf = vec![88, 0, 0, 0, 0]; // variant + dst, missing region+offset
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: truncated at StoreU8 (variant 89, partial)
+    #[test]
+    fn test_ser_decode_op_truncated_storeu8() {
+        let buf = vec![89, 0, 0, 0, 0]; // variant + region, missing offset+src
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: TableBr explicit roundtrip (variant 85)
+    #[test]
+    fn test_ser_decode_op_tablebr() {
+        let buf = vec![85, 0, 0, 0, 0, 1, 0, 0, 0]; // table=0, index=1
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::TableBr { table: 0, index: 1 }));
+    }
+
+    /// Test decode_terminator: Ret with multiple values explicit decode.
+    #[test]
+    fn test_ser_decode_terminator_ret_multi() {
+        let mut buf = vec![2]; // variant=2 (Ret)
+        buf.extend_from_slice(&3u32.to_le_bytes()); // count=3
+        buf.extend_from_slice(&10u32.to_le_bytes());
+        buf.extend_from_slice(&20u32.to_le_bytes());
+        buf.extend_from_slice(&30u32.to_le_bytes());
+        let mut pos = 0;
+        let t = decode_terminator(&buf, &mut pos).unwrap();
+        assert!(matches!(t, U30Terminator::Ret { values } if values == &[10, 20, 30]));
+    }
+
+    /// Test decode_terminator: TailCall with args explicit decode.
+    #[test]
+    fn test_ser_decode_terminator_tailcall_multi() {
+        let mut buf = vec![3]; // variant=3 (TailCall)
+        buf.extend_from_slice(&99u32.to_le_bytes()); // function=99
+        buf.extend_from_slice(&2u32.to_le_bytes()); // count=2
+        buf.extend_from_slice(&7u32.to_le_bytes());
+        buf.extend_from_slice(&8u32.to_le_bytes());
+        let mut pos = 0;
+        let t = decode_terminator(&buf, &mut pos).unwrap();
+        assert!(matches!(t, U30Terminator::TailCall { function: 99, args } if args == &[7, 8]));
+    }
+
+    /// Test full module decode at function boundary truncation.
+    #[test]
+    fn test_ser_decode_truncated_function_header() {
+        // Valid header + 1 empty region, but function data truncated mid-param-count
+        let mut data = Vec::new();
+        data.extend_from_slice(b"U30X");
+        data.push(1); // version
+        data.push(0); // 0 regions
+        data.push(1); // 1 function
+        // No params count byte — truncation
+        let err = decode(&data).expect_err("truncated function header");
+        assert!(err.to_string().contains("truncated") || !err.to_string().is_empty());
+    }
+
+    /// Test full module decode at table count boundary.
+    #[test]
+    fn test_ser_decode_truncated_table_count() {
+        // Valid header + 0 regions, then 0 table count but truncated
+        let mut data = Vec::new();
+        data.extend_from_slice(b"U30X");
+        data.push(1); // version
+        data.push(0); // 0 regions
+        // 0 tables count cut off at 1 byte (no functions data)
+        // But actually we need at least 1 function to reach tables
+        data.extend_from_slice(&0u32.to_le_bytes()); // 0 functions
+        data.extend_from_slice(&1u32.to_le_bytes()); // 1 table
+        // Truncated: table id missing
+        let err = decode(&data).expect_err("truncated at table id");
+        assert!(!err.to_string().is_empty());
+    }
+
+    /// Test decode_function: truncated params count.
+    #[test]
+    fn test_ser_decode_function_truncated_params() {
+        // Minimal valid header, then function with truncated param count
+        let mut data = Vec::new();
+        data.extend_from_slice(b"U30X");
+        data.push(1);
+        data.push(0); // 0 regions
+        data.push(0); // 0 tables
+        data.push(1); // 1 function
+        // Truncated: no param count byte
+        let err = decode(&data).expect_err("truncated params");
+        assert!(!err.to_string().is_empty());
+    }
+
+    /// Test decode_function: params present but truncated type bytes.
+    #[test]
+    fn test_ser_decode_function_truncated_param_types() {
+        // Valid header, function declares 2 params but provides only 1 type byte
+        let mut data = Vec::new();
+        data.extend_from_slice(b"U30X");
+        data.push(1);
+        data.push(0); // 0 regions
+        data.push(0); // 0 tables
+        data.push(1); // 1 function
+        data.extend_from_slice(&2u32.to_le_bytes()); // param_count=2
+        data.push(0); // param type 0 (Bool) — first param
+        // Missing second param type
+        let err = decode(&data).expect_err("truncated param types");
+        assert!(!err.to_string().is_empty());
+    }
+
+    /// Test decode_block: truncated block count.
+    #[test]
+    fn test_ser_decode_block_truncated_count() {
+        // Valid header, function with 1 block but block count byte missing
+        let mut data = Vec::new();
+        data.extend_from_slice(b"U30X");
+        data.push(1);
+        data.push(0); // 0 regions
+        data.push(0); // 0 tables
+        data.push(1); // 1 function
+        data.push(0); // 0 params
+        data.push(0); // 0 results
+        // Truncated: no block count
+        let err = decode(&data).expect_err("truncated block count");
+        assert!(!err.to_string().is_empty());
+    }
+
+    /// Test encode → decode roundtrip with all U30Value types as Const.
+    #[test]
+    fn test_ser_const_all_value_types_explicit() {
+        let values = [
+            (U30Value::Bool(false),  "Bool(false)"),
+            (U30Value::U8(0),       "U8"),
+            (U30Value::U16(0),      "U16"),
+            (U30Value::U32(0),      "U32"),
+            (U30Value::U64(0),      "U64"),
+            (U30Value::F32(0.0),    "F32"),
+            (U30Value::F64(0.0),    "F64"),
+        ];
+        for (val, name) in values {
+            let module = U30Module {
+                regions: vec![],
+                tables: vec![],
+                functions: vec![U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![U30Op::Const { dst: 0, value: val }],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                }],
+                entry_function: 0,
+            };
+            let decoded = decode(&encode(&module)).unwrap();
+            let got = &decoded.functions[0].blocks[0].ops[0];
+            assert!(matches!(got, U30Op::Const { .. }), "Const roundtrip failed for {}", name);
+        }
+    }
+
+    /// Test encode → decode for all U30Terminator variants with explicit assertions.
+    #[test]
+    fn test_ser_all_terminator_variants_explicit() {
+        // Br variant 0
+        {
+            let buf = vec![0, 5, 0, 0, 0]; // variant=0, target=5
+            let mut pos = 0;
+            let t = decode_terminator(&buf, &mut pos).unwrap();
+            assert!(matches!(t, U30Terminator::Br { target: 5 }));
+        }
+        // BrIf variant 1
+        {
+            let buf = vec![1, 3, 0, 0, 0, 7, 0, 0, 0, 9, 0, 0, 0]; // cond=3,then=7,else=9
+            let mut pos = 0;
+            let t = decode_terminator(&buf, &mut pos).unwrap();
+            assert!(matches!(t, U30Terminator::BrIf { cond: 3, then_target: 7, else_target: 9 }));
+        }
+        // Ret variant 2 (already covered)
+        // TailCall variant 3 (already covered)
+        // Trap variant 4
+        {
+            let buf = vec![4, 55, 0, 0, 0]; // variant=4, code=55
+            let mut pos = 0;
+            let t = decode_terminator(&buf, &mut pos).unwrap();
+            assert!(matches!(t, U30Terminator::Trap { code: 55 }));
+        }
+    }
+
+    /// Test decode_binary_op: valid indices 0-26 covered,
+    /// and invalid index 27 caught.
+    #[test]
+    fn test_ser_decode_binary_op_invalid_edge() {
+        // Test one more edge: index 28 (beyond known)
+        let err = decode_binary_op(28).unwrap_err();
+        assert!(err.to_string().contains("unknown binary op"), "got: {}", err);
+    }
+
+    /// Test decode_op: invalid binary op index within valid variant.
+    /// Provide all fields (dst, op_idx, a, b) so decode_binary_op is reached.
+    #[test]
+    fn test_ser_decode_op_invalid_binary_op_idx() {
+        // Variant 2 (Binary): variant + dst(4) + op_idx=27(4) + a(4) + b(4) = 17 bytes
+        let buf = vec![
+            2,                               // variant = Binary
+            27, 0, 0, 0,                    // op_idx = 27 (invalid)
+            0, 0, 0, 0,                     // dst = 0
+            0, 0, 0, 0,                     // a = 0
+            0, 0, 0, 0,                     // b = 0
+        ];
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("binary op"), "got: {}", err);
+    }
+
+    /// Test encode and decode: module with all types as params and results.
+    #[test]
+    fn test_ser_module_all_param_result_types() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![
+                    U30Type::Bool,
+                    U30Type::U8,
+                    U30Type::U16,
+                    U30Type::U32,
+                    U30Type::U64,
+                    U30Type::F32,
+                    U30Type::F64,
+                ],
+                results: vec![
+                    U30Type::Bool,
+                    U30Type::U8,
+                    U30Type::U16,
+                    U30Type::U32,
+                    U30Type::U64,
+                    U30Type::F32,
+                    U30Type::F64,
+                ],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![0, 1, 2, 3, 4, 5, 6] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let decoded = decode(&encode(&module)).unwrap();
+        assert_eq!(decoded.functions[0].params.len(), 7);
+        assert_eq!(decoded.functions[0].results.len(), 7);
+    }
+
+    /// Test decode_value: Bool variant explicitly.
+    #[test]
+    fn test_ser_decode_value_bool_false() {
+        let buf = vec![0, 0]; // type=0, value=false
+        let mut pos = 0;
+        let val = decode_value(&buf, &mut pos).unwrap();
+        assert!(matches!(val, U30Value::Bool(false)));
+    }
+
+    /// Test decode_op: Const with F64 value explicit decode.
+    #[test]
+    fn test_ser_decode_op_const_f64() {
+        let bits: u64 = 0x3FF0000000000000u64; // 1.0
+        let mut buf = vec![1]; // variant=Const
+        buf.extend_from_slice(&0u32.to_le_bytes()); // dst=0
+        buf.push(6); // value type=F64
+        buf.extend_from_slice(&bits.to_le_bytes());
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Const { dst: 0, value: U30Value::F64(f) }
+            if f.to_bits() == bits));
+    }
+
+    /// Test decode_op: Const with F32 value explicit decode.
+    #[test]
+    fn test_ser_decode_op_const_f32() {
+        let bits: u32 = 0x40490FDBu32; // 3.14159
+        let mut buf = vec![1]; // variant=Const
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.push(5); // value type=F32
+        buf.extend_from_slice(&bits.to_le_bytes());
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Const { dst: 0, value: U30Value::F32(f) }
+            if f.to_bits() == bits));
+    }
+
+    /// Test decode_op: Const with U16 value explicit decode.
+    #[test]
+    fn test_ser_decode_op_const_u16() {
+        let mut buf = vec![1]; // variant=Const
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.push(2); // value type=U16
+        buf.extend_from_slice(&0xCDu16.to_le_bytes()); // 0xCD
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Const { dst: 0, value: U30Value::U16(0xCD) }));
+    }
+
+    /// Test decode_op: Const with Bool value explicit decode.
+    #[test]
+    fn test_ser_decode_op_const_bool() {
+        let mut buf = vec![1]; // variant=Const
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.push(0); // value type=Bool
+        buf.push(1); // value=true
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Const { dst: 0, value: U30Value::Bool(true) }));
+    }
+
+    /// Test decode_op: MemSize explicit decode (variant 52).
+    #[test]
+    fn test_ser_decode_op_memsize() {
+        let mut buf = vec![52];
+        buf.extend_from_slice(&3u32.to_le_bytes()); // dst=3
+        buf.extend_from_slice(&1u32.to_le_bytes()); // region=1
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::MemSize { dst: 3, region: 1 }));
+    }
+
+    /// Test decode_op: MemGrow explicit decode (variant 53).
+    #[test]
+    fn test_ser_decode_op_memgrow() {
+        let mut buf = vec![53];
+        buf.extend_from_slice(&4u32.to_le_bytes()); // dst=4
+        buf.extend_from_slice(&2u32.to_le_bytes()); // region=2
+        buf.extend_from_slice(&8u32.to_le_bytes()); // delta=8
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::MemGrow { dst: 4, region: 2, delta: 8 }));
+    }
+
+    /// Test decode_op: MemFill explicit decode (variant 51, complete).
+    #[test]
+    fn test_ser_decode_op_memfill() {
+        let mut buf = vec![51];
+        buf.extend_from_slice(&0u32.to_le_bytes()); // region=0
+        buf.extend_from_slice(&16u32.to_le_bytes()); // offset=16
+        buf.extend_from_slice(&99u32.to_le_bytes()); // value=99
+        buf.extend_from_slice(&4u32.to_le_bytes()); // size=4
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::MemFill { region: 0, offset: 16, value: 99, size: 4 }));
+    }
+
+    /// Test decode_op: MemCopy explicit decode (variant 50, complete).
+    #[test]
+    fn test_ser_decode_op_memcopy() {
+        let mut buf = vec![50];
+        buf.extend_from_slice(&0u32.to_le_bytes()); // dst_region=0
+        buf.extend_from_slice(&8u32.to_le_bytes());  // dst_offset=8
+        buf.extend_from_slice(&1u32.to_le_bytes()); // src_region=1
+        buf.extend_from_slice(&0u32.to_le_bytes());  // src_offset=0
+        buf.extend_from_slice(&4u32.to_le_bytes());  // size=4
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::MemCopy {
+            dst_region: 0, dst_offset: 8, src_region: 1, src_offset: 0, size: 4
+        }));
+    }
+
+    /// Test decode_op: Call with 0 args and 0 results explicit decode (variant 83).
+    #[test]
+    fn test_ser_decode_op_call_empty() {
+        let mut buf = vec![83];
+        buf.extend_from_slice(&7u32.to_le_bytes()); // function=7
+        buf.extend_from_slice(&0u32.to_le_bytes()); // arg_count=0
+        buf.extend_from_slice(&0u32.to_le_bytes()); // result_count=0
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Call { function: 7, args, results }
+            if args.is_empty() && results.is_empty()));
+    }
+
+    /// Test decode_op: IndirectCall with 0 args and 0 results (variant 84).
+    #[test]
+    fn test_ser_decode_op_indirect_call_empty() {
+        let mut buf = vec![84];
+        buf.extend_from_slice(&5u32.to_le_bytes()); // function_reg=5
+        buf.extend_from_slice(&0u32.to_le_bytes()); // arg_count=0
+        buf.extend_from_slice(&0u32.to_le_bytes()); // result_count=0
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::IndirectCall { function: 5, args, results }
+            if args.is_empty() && results.is_empty()));
+    }
+
+    /// Test decode_op: I2F explicit decode (variant 8).
+    #[test]
+    fn test_ser_decode_op_i2f() {
+        let buf = vec![8, 0, 0, 0, 0, 1, 0, 0, 0]; // dst=0, src=1
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::I2F { dst: 0, src: 1 }));
+    }
+
+    /// Test decode_op: F2I explicit decode (variant 9).
+    #[test]
+    fn test_ser_decode_op_f2i() {
+        let buf = vec![9, 2, 0, 0, 0, 3, 0, 0, 0]; // dst=2, src=3
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::F2I { dst: 2, src: 3 }));
+    }
+
+    /// Test decode_op: Select explicit decode (variant 3, complete).
+    #[test]
+    fn test_ser_decode_op_select() {
+        let buf = vec![3, 5, 0, 0, 0, 6, 0, 0, 0, 7, 0, 0, 0, 8, 0, 0, 0];
+        // dst=5, cond=6, a=7, b=8
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Select { dst: 5, cond: 6, a: 7, b: 8 }));
+    }
+
+    /// Test decode_op: NotU8 explicit decode (variant 4).
+    #[test]
+    fn test_ser_decode_op_notu8() {
+        let buf = vec![4, 9, 0, 0, 0, 10, 0, 0, 0]; // dst=9, src=10
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::NotU8 { dst: 9, src: 10 }));
+    }
+
+    /// Test decode_op: AbsU64 explicit decode (variant 13).
+    #[test]
+    fn test_ser_decode_op_absu64() {
+        let buf = vec![13, 1, 0, 0, 0, 2, 0, 0, 0]; // dst=1, src=2
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::AbsU64 { dst: 1, src: 2 }));
+    }
+
+    /// Test decode_op: NegU64 explicit decode (variant 15).
+    #[test]
+    fn test_ser_decode_op_negu64() {
+        let buf = vec![15, 3, 0, 0, 0, 4, 0, 0, 0]; // dst=3, src=4
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::NegU64 { dst: 3, src: 4 }));
+    }
+
+    /// Test decode_op: CtzU64 explicit decode (variant 17).
+    #[test]
+    fn test_ser_decode_op_ctzu64() {
+        let buf = vec![17, 5, 0, 0, 0, 6, 0, 0, 0]; // dst=5, src=6
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::CtzU64 { dst: 5, src: 6 }));
+    }
+
+    /// Test decode_op: ClzU64 explicit decode (variant 19).
+    #[test]
+    fn test_ser_decode_op_clzu64() {
+        let buf = vec![19, 7, 0, 0, 0, 8, 0, 0, 0]; // dst=7, src=8
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::ClzU64 { dst: 7, src: 8 }));
+    }
+
+    /// Test decode_op: PopcntU64 explicit decode (variant 21).
+    #[test]
+    fn test_ser_decode_op_popcntu64() {
+        let buf = vec![21, 9, 0, 0, 0, 10, 0, 0, 0]; // dst=9, src=10
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::PopcntU64 { dst: 9, src: 10 }));
+    }
+
+    /// Test decode_op: RotlU64 explicit decode (variant 23).
+    #[test]
+    fn test_ser_decode_op_rotlu64() {
+        let buf = vec![23, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0]; // dst=1,val=2,sh=3
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::RotlU64 { dst: 1, val: 2, sh: 3 }));
+    }
+
+    /// Test decode_op: ZExtI8U16 explicit decode (variant 41).
+    #[test]
+    fn test_ser_decode_op_zexti8u16() {
+        let buf = vec![41, 0, 0, 0, 0, 1, 0, 0, 0]; // dst=0, src=1
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::ZExtI8U16 { dst: 0, src: 1 }));
+    }
+
+    /// Test decode_op: TruncU64U32 explicit decode (variant 47).
+    #[test]
+    fn test_ser_decode_op_truncu64u32() {
+        let buf = vec![47, 2, 0, 0, 0, 3, 0, 0, 0]; // dst=2, src=3
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::TruncU64U32 { dst: 2, src: 3 }));
+    }
+
+    /// Test decode_op: SExtI8U16 explicit decode (variant 74).
+    #[test]
+    fn test_ser_decode_op_sexti8u16() {
+        let buf = vec![74, 1, 0, 0, 0, 2, 0, 0, 0]; // dst=1, src=2
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::SExtI8U16 { dst: 1, src: 2 }));
+    }
+
+    /// Test decode_op: ByteSwapU16 explicit decode (variant 80).
+    #[test]
+    fn test_ser_decode_op_byteswapu16() {
+        let buf = vec![80, 3, 0, 0, 0, 4, 0, 0, 0]; // dst=3, src=4
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::ByteSwapU16 { dst: 3, src: 4 }));
+    }
+
+    /// Test decode_op: ReinterpretF32U32 explicit decode (variant 11).
+    #[test]
+    fn test_ser_decode_op_reinterpret_f32_u32() {
+        let buf = vec![11, 0, 0, 0, 0, 1, 0, 0, 0]; // dst=0, src=1
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::ReinterpretF32U32 { dst: 0, src: 1 }));
+    }
+
+    /// Test decode_op: ReinterpretU32F32 explicit decode (variant 12).
+    #[test]
+    fn test_ser_decode_op_reinterpret_u32_f32() {
+        let buf = vec![12, 1, 0, 0, 0, 2, 0, 0, 0]; // dst=1, src=2
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::ReinterpretU32F32 { dst: 1, src: 2 }));
+    }
+
+    /// Test decode_op: TruncF32U64 explicit decode (variant 10).
+    #[test]
+    fn test_ser_decode_op_truncf32u64() {
+        let buf = vec![10, 2, 0, 0, 0, 3, 0, 0, 0]; // dst=2, src=3
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::TruncF32U64 { dst: 2, src: 3 }));
+    }
+
+    /// Test decode_op: variant 95 StoreU64 truncated.
+    #[test]
+    fn test_ser_decode_op_truncated_storeu64() {
+        let buf = vec![95, 0, 0, 0, 0]; // variant + region, missing offset+src
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: variant 94 LoadU64 truncated.
+    #[test]
+    fn test_ser_decode_op_truncated_loadu64() {
+        let buf = vec![94, 0, 0, 0, 0, 1, 0, 0, 0]; // variant + dst + region, missing offset
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: variant 93 StoreU32 truncated.
+    #[test]
+    fn test_ser_decode_op_truncated_storeu32() {
+        let buf = vec![93, 0, 0, 0, 0]; // variant + region, missing offset+src
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: variant 92 LoadU32 truncated.
+    #[test]
+    fn test_ser_decode_op_truncated_loadu32() {
+        let buf = vec![92, 0, 0, 0, 0, 1, 0, 0, 0]; // variant + dst + region, missing offset
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: variant 91 StoreU16 truncated.
+    #[test]
+    fn test_ser_decode_op_truncated_storeu16() {
+        let buf = vec![91, 0, 0, 0, 0]; // variant + region, missing offset+src
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: variant 90 LoadU16 truncated.
+    #[test]
+    fn test_ser_decode_op_truncated_loadu16() {
+        let buf = vec![90, 0, 0, 0, 0, 1, 0, 0, 0]; // variant + dst + region, missing offset
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: MemFill truncated (variant 51, missing fields).
+    #[test]
+    fn test_ser_decode_op_truncated_memfill() {
+        let buf = vec![51, 0, 0, 0, 0, 1, 0, 0, 0]; // region + offset + value, missing size
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: MemSize truncated (variant 52, missing region).
+    #[test]
+    fn test_ser_decode_op_truncated_memsize() {
+        let buf = vec![52, 0, 0, 0, 0]; // variant + dst, missing region
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: MemGrow truncated (variant 53, missing delta).
+    #[test]
+    fn test_ser_decode_op_truncated_memgrow() {
+        let buf = vec![53, 0, 0, 0, 0, 1, 0, 0, 0]; // variant + dst + region, missing delta
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: Call result_count present but truncated results (variant 83).
+    #[test]
+    fn test_ser_decode_op_truncated_call_results() {
+        let mut buf = vec![83];
+        buf.extend_from_slice(&0u32.to_le_bytes()); // function=0
+        buf.extend_from_slice(&0u32.to_le_bytes()); // arg_count=0
+        buf.extend_from_slice(&2u32.to_le_bytes()); // result_count=2
+        buf.extend_from_slice(&0u32.to_le_bytes()); // result1
+        // result2 missing
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: IndirectCall result_count present but truncated (variant 84).
+    #[test]
+    fn test_ser_decode_op_truncated_indirect_call_results() {
+        let mut buf = vec![84];
+        buf.extend_from_slice(&0u32.to_le_bytes()); // function_reg=0
+        buf.extend_from_slice(&0u32.to_le_bytes()); // arg_count=0
+        buf.extend_from_slice(&2u32.to_le_bytes()); // result_count=2
+        buf.extend_from_slice(&0u32.to_le_bytes()); // result1
+        // result2 missing
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    /// Test decode_op: variant 0 (Nop) works even with extra trailing bytes.
+    #[test]
+    fn test_ser_decode_op_nop_trailing_bytes() {
+        let buf = vec![0, 99, 99, 99]; // Nop followed by garbage
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Nop));
+        assert_eq!(pos, 1); // only consumed the variant byte
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // End of additional coverage tests
+    // ─────────────────────────────────────────────────────────────────
+
     // Test encode/decode with table with many targets
     #[test]
     fn test_ser_encode_decode_table_many_targets() {
