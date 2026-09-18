@@ -27,7 +27,7 @@
 //! ```
 
 use crate::error::{Error, Result};
-use crate::ir::{U30BinaryOp, U30Module, U30Op, U30Terminator, U30Value, U30Block, U30TableDecl};
+use crate::ir::{U30BinaryOp, U30Module, U30Op, U30Terminator, U30Value, U30Block};
 use crate::runtime::U30ExecutionOutcome;
 use std::collections::BTreeMap;
 
@@ -1244,7 +1244,7 @@ pub use DebugEvent as U30DebugEvent;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{U30Block, U30Function, U30RegionDecl, U30Type, U30Value, U30Op, U30Terminator, U30Module};
+    use crate::ir::{U30Block, U30Function, U30RegionDecl, U30TableDecl, U30Type, U30Value, U30Op, U30Terminator, U30Module};
 
     fn simple_module() -> U30Module {
         U30Module {
