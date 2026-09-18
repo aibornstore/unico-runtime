@@ -2135,6 +2135,78 @@ mod tests {
     }
 
     #[test]
+    fn test_e4_fdiv_by_zero_fails() {
+        // FDiv: division by zero should fail
+        let mut exec = E4Executor::default();
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::FImm { dst: 0, imm: 10.0 },
+                    Instruction::FImm { dst: 1, imm: 0.0 },  // divisor = 0
+                    Instruction::FDiv { dst: 2, a: 0, b: 1 }, // 10.0 / 0.0
+                    Instruction::Ret { dst: 2 },
+                ],
+            }],
+            memory: vec![0u8; 256],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().unwrap().contains("division by zero"), "got: {}", result.error.as_ref().unwrap());
+    }
+
+    #[test]
+    fn test_e4_i2f_with_f64_value_fails() {
+        // I2F: source register is F64, not i32 → type error
+        let mut exec = E4Executor::default();
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::FImmF64 { dst: 0, imm: 42.0 },  // r0 = F64(42.0)
+                    Instruction::I2F { dst: 1, a: 0 },             // r1 = i32(r0) — fails
+                    Instruction::Ret { dst: 1 },
+                ],
+            }],
+            memory: vec![0u8; 256],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("expected i32"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_e4_u2f_with_f64_value_fails() {
+        // U2F: source register is F64, not i32 → type error
+        let mut exec = E4Executor::default();
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code: vec![
+                    Instruction::FImmF64 { dst: 0, imm: 42.0 },  // r0 = F64(42.0)
+                    Instruction::U2F { dst: 1, a: 0 },             // r1 = u32(r0) — fails
+                    Instruction::Ret { dst: 1 },
+                ],
+            }],
+            memory: vec![0u8; 256],
+            tables: vec![],
+        };
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("expected i32"), "got: {}", err);
+    }
+
+    #[test]
     fn test_e4_tablebr_invalid_index_fails() {
         // TableBr: invalid table index
         let mut exec = E4Executor::default();
