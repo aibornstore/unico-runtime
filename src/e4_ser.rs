@@ -876,6 +876,98 @@ mod tests {
     }
 
     #[test]
+    fn test_e4_decode_truncated_function_header() {
+        // Truncate during function header (missing instr_count field)
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"E4XX");                      // 0-3: magic
+        bytes.push(1);                                         // 4: version
+        bytes.extend_from_slice(&4u32.to_le_bytes());          // 5-8: memory size = 4
+        bytes.extend_from_slice(&vec![0u8; 4]);                // 9-12: memory
+        bytes.extend_from_slice(&1u32.to_le_bytes());          // 13-16: fn_count = 1
+        bytes.extend_from_slice(&0u32.to_le_bytes());          // 17-20: param_count
+        bytes.extend_from_slice(&0u32.to_le_bytes());          // 21-24: result_count
+        bytes.extend_from_slice(&4u32.to_le_bytes());          // 25-28: register_count
+        // instr_count MISSING here → truncated during decode_function_from_cursor
+        let result = decode_e4(&bytes);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_instruction_fields() {
+        // Encode module with FAdd (3 fields: dst, a, b), truncate after opcode only
+        // FAdd encoding: opcode(1) + dst(4) + a(4) + b(4) = 13 bytes per instruction
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::FAdd { dst: 0, a: 1, b: 2 }],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![],
+        };
+        let encoded = encode_e4(&module);
+        // Module layout: header(5) + memory(8) + fn_count(4) + fn_header(17) + FAdd(13) = 47
+        // Truncate after opcode byte of FAdd (position 43 = 42+1), leaving 0 bytes for dst field
+        let truncated = &encoded[..43];
+        let result = decode_e4(truncated);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_table_entry_count() {
+        // Module with 1 table, 2 entries → truncate before entry_count is fully read
+        // Header: magic(4) + version(1) + mem_size(4) + mem(4) = 13
+        // Fn: fn_count(4) + header(17) + Trap(1) = 22 → total = 35
+        // Tables: table_count(4) + entry_count(4) + targets(8) = 16 → total = 51
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::Trap],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![vec![10, 20]], // 2 entries
+        };
+        let encoded = encode_e4(&module);
+        // Tables start at byte 35. Truncate at byte 37 → cuts into entry_count field
+        // entry_count = 2 (at bytes 37-40), truncating at 37 cuts at 2 bytes of entry_count
+        let truncated = &encoded[..37];
+        let result = decode_e4(truncated);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_e4_decode_truncated_table_targets() {
+        // Module with 1 table, 2 entries → truncate during second target read
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 0,
+                register_count: 4,
+                code: vec![Instruction::Trap],
+            }],
+            memory: vec![0u8; 4],
+            tables: vec![vec![10, 20]], // 2 entries
+        };
+        let encoded = encode_e4(&module);
+        // Tables start at byte 35. entry_count at 37-40. First target at 41-44.
+        // Truncate at byte 44 → cuts in the middle of second target (20)
+        let truncated = &encoded[..44];
+        let result = decode_e4(truncated);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
     fn test_e4_decode_unknown_opcode() {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(b"E4XX");
