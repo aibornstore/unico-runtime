@@ -7153,4 +7153,201 @@ mod tests {
             assert_eq!(op, decoded, "roundtrip failed for {:?}", op);
         }
     }
+
+    /// Test ALL U30Op variants via full encode/decode roundtrip
+    #[test]
+    fn test_ser_all_op_variants_roundtrip_v2() {
+        use crate::ir::{U30Op::*, U30BinaryOp::*, U30Value::*};
+        let mut ops = Vec::new();
+
+        // Group 0: Simple ops (0-3)
+        ops.push(U30Op::Nop); // 0
+        ops.push(Const { dst: 1, value: U64(42) }); // 1
+        ops.push(Binary { dst: 2, op: AddWrapU64, a: 0, b: 1 }); // 2
+        ops.push(Select { dst: 3, cond: 10, a: 1, b: 2 }); // 3
+
+        // Group 1: Not ops (4-7)
+        ops.push(NotU8 { dst: 4, src: 0 }); // 4
+        ops.push(NotU16 { dst: 5, src: 1 }); // 5
+        ops.push(NotU32 { dst: 6, src: 2 }); // 6
+        ops.push(NotU64 { dst: 7, src: 3 }); // 7
+
+        // Group 2: Conversion (8-12)
+        ops.push(I2F { dst: 8, src: 0 }); // 8
+        ops.push(F2I { dst: 9, src: 1 }); // 9
+        ops.push(TruncF32U64 { dst: 10, src: 2 }); // 10
+        ops.push(ReinterpretF32U32 { dst: 11, src: 3 }); // 11
+        ops.push(ReinterpretU32F32 { dst: 12, src: 0 }); // 12
+
+        // Group 3: Unary arithmetic (13-25)
+        ops.push(AbsU64 { dst: 13, src: 0 }); // 13
+        ops.push(AbsU32 { dst: 14, src: 1 }); // 14
+        ops.push(NegU64 { dst: 15, src: 2 }); // 15
+        ops.push(NegU32 { dst: 16, src: 3 }); // 16
+        ops.push(CtzU64 { dst: 17, src: 0 }); // 17
+        ops.push(CtzU32 { dst: 18, src: 1 }); // 18
+        ops.push(ClzU64 { dst: 19, src: 2 }); // 19
+        ops.push(ClzU32 { dst: 20, src: 3 }); // 20
+        ops.push(PopcntU64 { dst: 21, src: 0 }); // 21
+        ops.push(PopcntU32 { dst: 22, src: 1 }); // 22
+        ops.push(RotlU64 { dst: 23, val: 0, sh: 1 }); // 24
+        ops.push(RotlU32 { dst: 24, val: 2, sh: 3 }); // 25
+
+        // Group 4: Rotate/shift (26-33)
+        ops.push(RotrU64 { dst: 25, val: 0, sh: 1 }); // 26
+        ops.push(RotrU32 { dst: 26, val: 2, sh: 3 }); // 27
+        ops.push(ByteSwapU16 { dst: 27, src: 0 }); // 28
+        ops.push(ByteSwapU32 { dst: 28, src: 1 }); // 29
+        ops.push(ByteSwapU64 { dst: 29, src: 2 }); // 30
+
+        // Group 5: Conversion (31-45)
+        ops.push(ZExtI8U16 { dst: 30, src: 0 }); // 31
+        ops.push(ZExtI8U32 { dst: 31, src: 1 }); // 32
+        ops.push(ZExtI8U64 { dst: 32, src: 2 }); // 33
+        ops.push(ZExtI16U32 { dst: 33, src: 0 }); // 34
+        ops.push(ZExtI16U64 { dst: 34, src: 1 }); // 35
+        ops.push(ZExtI32U64 { dst: 35, src: 2 }); // 36
+        ops.push(TruncU64U32 { dst: 36, src: 0 }); // 37
+        ops.push(TruncU64U16 { dst: 37, src: 1 }); // 38
+        ops.push(TruncU32U16 { dst: 38, src: 2 }); // 39
+        ops.push(I64F64 { dst: 39, src: 0 }); // 40
+        ops.push(F64I64 { dst: 40, src: 1 }); // 41
+        ops.push(F32F64 { dst: 41, src: 2 }); // 42
+        ops.push(F64F32 { dst: 42, src: 0 }); // 43
+        ops.push(ReinterpretF64U64 { dst: 43, src: 1 }); // 44
+        ops.push(ReinterpretU64F64 { dst: 44, src: 2 }); // 45
+
+        // Group 6: Conversion (46-55)
+        ops.push(SExtI8U16 { dst: 45, src: 0 }); // 46
+        ops.push(SExtI8U32 { dst: 46, src: 1 }); // 47
+        ops.push(SExtI8U64 { dst: 47, src: 2 }); // 48
+        ops.push(SExtI16U32 { dst: 48, src: 0 }); // 49
+        ops.push(SExtI16U64 { dst: 49, src: 1 }); // 50
+        ops.push(SExtI32U64 { dst: 50, src: 2 }); // 51
+        ops.push(MemSize { dst: 51, region: 0 }); // 52
+        ops.push(MemGrow { dst: 52, region: 0, delta: 1 }); // 53
+
+        // Group 7: F32 comparison (56-65)
+        ops.push(FEq { dst: 53, a: 0, b: 1 }); // 56
+        ops.push(FLt { dst: 54, a: 2, b: 3 }); // 57
+        ops.push(FGt { dst: 55, a: 0, b: 1 }); // 58
+        ops.push(FLe { dst: 56, a: 2, b: 3 }); // 59
+        ops.push(FGe { dst: 57, a: 0, b: 1 }); // 60
+
+        // Group 8: F32 arithmetic (61-69)
+        ops.push(FAdd { dst: 58, a: 0, b: 1 }); // 61
+        ops.push(FSub { dst: 59, a: 2, b: 3 }); // 60
+        ops.push(FMul { dst: 60, a: 0, b: 1 }); // 61
+        ops.push(FDiv { dst: 61, a: 2, b: 3 }); // 62
+        ops.push(FSqrt { dst: 62, src: 0 }); // 63
+        ops.push(FAbs { dst: 63, src: 1 }); // 64
+        ops.push(FNeg { dst: 64, src: 2 }); // 65
+        ops.push(FMin { dst: 65, a: 0, b: 1 }); // 66
+        ops.push(FMax { dst: 66, a: 2, b: 3 }); // 67
+
+        // Group 9: F64 comparison (70-75)
+        ops.push(F64Eq { dst: 67, a: 0, b: 1 }); // 70
+        ops.push(F64Lt { dst: 68, a: 2, b: 3 }); // 71
+        ops.push(F64Gt { dst: 69, a: 0, b: 1 }); // 72
+        ops.push(F64Le { dst: 70, a: 2, b: 3 }); // 73
+        ops.push(F64Ge { dst: 71, a: 0, b: 1 }); // 74
+
+        // Group 10: F64 arithmetic (76-86)
+        ops.push(F64Add { dst: 72, a: 0, b: 1 }); // 76
+        ops.push(F64Sub { dst: 73, a: 2, b: 3 }); // 77
+        ops.push(F64Mul { dst: 74, a: 0, b: 1 }); // 78
+        ops.push(F64Div { dst: 75, a: 2, b: 3 }); // 79
+        ops.push(F64Sqrt { dst: 76, src: 0 }); // 80
+        ops.push(F64Abs { dst: 77, src: 1 }); // 81
+        ops.push(F64Neg { dst: 78, src: 2 }); // 82
+        ops.push(F64Min { dst: 79, a: 0, b: 1 }); // 83
+        ops.push(F64Max { dst: 80, a: 2, b: 3 }); // 84
+
+        // Group 11: Memory (85-89)
+        ops.push(LoadU8 { dst: 81, region: 0, offset: 1 }); // 85
+        ops.push(StoreU8 { region: 0, offset: 2, src: 3 }); // 86
+        ops.push(LoadU16 { dst: 82, region: 0, offset: 1 }); // 87
+        ops.push(StoreU16 { region: 0, offset: 2, src: 3 }); // 88
+        ops.push(LoadU32 { dst: 83, region: 0, offset: 1 }); // 89
+        ops.push(StoreU32 { region: 0, offset: 2, src: 3 }); // 90
+        ops.push(LoadU64 { dst: 84, region: 0, offset: 1 }); // 91
+        ops.push(StoreU64 { region: 0, offset: 2, src: 3 }); // 92
+        ops.push(MemCopy { dst_region: 0, dst_offset: 1, src_region: 0, src_offset: 2, size: 3 }); // 93
+        ops.push(MemFill { region: 0, offset: 1, value: 2, size: 3 }); // 94
+
+        // Group 12: Call/Control (95-96)
+        ops.push(Call { function: 0, args: vec![], results: vec![] }); // 95
+        ops.push(IndirectCall { function: 1, args: vec![2], results: vec![3] }); // 96
+        ops.push(TableBr { table: 0, index: 1 }); // 97
+        ops.push(Break { code: 0 }); // 98
+        ops.push(Assert { cond: 1, msg: 2 }); // 99
+
+        // Encode all ops individually and decode
+        for (idx, op) in ops.iter().enumerate() {
+            let mut buf = Vec::new();
+            encode_op(&mut buf, op);
+            let mut pos = 0;
+            let decoded = decode_op(&buf, &mut pos).unwrap();
+            assert_eq!(format!("{:?}", op), format!("{:?}", decoded),
+                "roundtrip failed for op index {}", idx);
+        }
+    }
+
+    /// Test all U30Terminator variants via encode/decode roundtrip
+    #[test]
+    fn test_ser_all_terminator_variants_roundtrip_v2() {
+        use crate::ir::U30Terminator::*;
+        let terms = vec![
+            Br { target: 1 },
+            BrIf { cond: 0, then_target: 1, else_target: 2 },
+            Ret { values: vec![0, 1] },
+            TailCall { function: 0, args: vec![1, 2] },
+            Trap { code: 42 },
+        ];
+        for (ti, term) in terms.iter().enumerate() {
+            // Create a minimal module to test terminator encoding
+            let module = crate::ir::U30Module {
+                regions: vec![],
+                tables: vec![],
+                functions: vec![crate::ir::U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![crate::ir::U30Block {
+                        ops: vec![],
+                        terminator: term.clone(),
+                    }],
+                    entry_block: 0,
+                }],
+                entry_function: 0,
+            };
+            let encoded = encode(&module);
+            let decoded = decode(&encoded).unwrap();
+            let decoded_term = &decoded.functions[0].blocks[0].terminator;
+            assert_eq!(format!("{:?}", term), format!("{:?}", decoded_term),
+                "roundtrip failed for terminator index {}", ti);
+        }
+    }
+
+    /// Test all U30Value variants via encode/decode roundtrip
+    #[test]
+    fn test_ser_all_value_variants_roundtrip_v2() {
+        use crate::ir::U30Value::*;
+        let values = vec![
+            Bool(true), Bool(false),
+            U8(0), U8(255),
+            U16(0), U16(65535),
+            U32(0), U32(0xDEADBEEF),
+            U64(0), U64(0xDEADBEEFCAFEBABE),
+            F32(0.0), F32(1.0), F32(-3.14),
+            F64(0.0), F64(1.0), F64(-3.14), F64(f64::INFINITY),
+        ];
+        for val in values {
+            let mut buf = Vec::new();
+            encode_value(&mut buf, &val);
+            let mut pos = 0;
+            let decoded = decode_value(&buf, &mut pos).unwrap();
+            assert_eq!(format!("{:?}", val), format!("{:?}", decoded),
+                "roundtrip failed for {:?}", val);
+        }
+    }
 }

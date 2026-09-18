@@ -1,4 +1,4 @@
-//! U30 Debugger — step-by-step execution with breakpoints and inspection.
+﻿//! U30 Debugger — step-by-step execution with breakpoints and inspection.
 //!
 //! ## Example
 //! ```rust,no_run

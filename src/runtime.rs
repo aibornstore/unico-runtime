@@ -7693,4 +7693,611 @@ mod tests {
         assert_eq!(out.results, vec![U30Value::U64(0xEFCDAB8967452301)]);
     }
 
+    // === Not operations ===
+    #[test]
+    fn u30x_not_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0b10101010) },
+                        U30Op::NotU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U32(!0b10101010u32)]);
+    }
+
+    #[test]
+    fn u30x_not_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0xFF00FF00FF00FF00) },
+                        U30Op::NotU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(!0xFF00FF00FF00FF00u64)]);
+    }
+
+    // === Abs/Neg operations ===
+    #[test]
+    fn u30x_abs_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(42) },
+                        U30Op::AbsU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U32(42)]);
+    }
+
+    #[test]
+    fn u30x_abs_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(12345678901234) },
+                        U30Op::AbsU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(12345678901234)]);
+    }
+
+    #[test]
+    fn u30x_neg_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(1) },
+                        U30Op::NegU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U32(u32::MAX)]); // wrapping_neg
+    }
+
+    #[test]
+    fn u30x_neg_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(1) },
+                        U30Op::NegU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(u64::MAX)]); // wrapping_neg
+    }
+
+    // === Bit counting ===
+    #[test]
+    fn u30x_clz_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0b0001_0000u32) }, // 5 leading zeros
+                        U30Op::ClzU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(27)]); // 32 - 5 = 27
+    }
+
+    #[test]
+    fn u30x_clz_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0b0001_0000u64) },
+                        U30Op::ClzU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(59)]); // 64 - 5 = 59
+    }
+
+    #[test]
+    fn u30x_ctz_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0b0001_0000u32) }, // trailing zeros before first 1 = 4
+                        U30Op::CtzU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(4)]);
+    }
+
+    #[test]
+    fn u30x_ctz_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0b0010_0000u64) }, // trailing zeros = 5
+                        U30Op::CtzU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(5)]);
+    }
+
+    #[test]
+    fn u30x_popcnt_u32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0b11110000u32) },
+                        U30Op::PopcntU32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(4)]);
+    }
+
+    #[test]
+    fn u30x_popcnt_u64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0b11110000u64) },
+                        U30Op::PopcntU64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(4)]);
+    }
+
+    // === F32 conversions ===
+    #[test]
+    fn u30x_i2f_f2i() {
+        // I2F: u64 → f32, F2I: f32 → u64
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::I2F { dst: 1, src: 0 },
+                        U30Op::F2I { dst: 2, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(42)]);
+    }
+
+    #[test]
+    fn u30x_reinterpret_f32_rt() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(10.0) },
+                        U30Op::ReinterpretF32U32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U32(10.0f32.to_bits())]);
+    }
+
+    #[test]
+    fn u30x_reinterpret_u32_f32_rt() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0x40490FD0) },
+                        U30Op::ReinterpretU32F32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::F32(f32::from_bits(0x40490FD0))]);
+    }
+
+    #[test]
+    fn u30x_trunc_f32_u64_nan_rt() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(f32::NAN) },
+                        U30Op::TruncF32U64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(0)]); // NaN → 0
+    }
+
+    #[test]
+    fn u30x_trunc_f32_u64_negative_rt() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(-1.5) },
+                        U30Op::TruncF32U64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(0)]); // negative → 0
+    }
+
+    // === F32/F64 conversions ===
+    #[test]
+    fn u30x_f32_f64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(3.14) },
+                        U30Op::F32F64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert!((out.results[0].as_f64().unwrap() - 3.14).abs() < 1e-6);
+    }
+
+    #[test]
+    fn u30x_f64_f32() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(3.14159265) },
+                        U30Op::F64F32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert!((out.results[0].as_f32().unwrap() - 3.14159265).abs() < 1e-5);
+    }
+
+    // === Reinterpret F64/U64 ===
+    #[test]
+    fn u30x_reinterpret_f64_u64_rt() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.5) },
+                        U30Op::ReinterpretF64U64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(1.5f64.to_bits())]);
+    }
+
+    #[test]
+    fn u30x_reinterpret_u64_f64_rt() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0x3FF8000000000000u64) }, // 1.5 as f64 bits
+                        U30Op::ReinterpretU64F64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::F64(f64::from_bits(0x3FF8000000000000u64))]);
+    }
+
+    // === Trunc variants (runtime-specific) ===
+    #[test]
+    fn u30x_trunc_u64_u32_rt() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0x1_0000_0005) },
+                        U30Op::TruncU64U32 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U32(5)]);
+    }
+
+    #[test]
+    fn u30x_trunc_u64_u16_rt() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U16],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0x1_0005) },
+                        U30Op::TruncU64U16 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U16(5)]);
+    }
+
+    #[test]
+    fn u30x_trunc_u32_u16_rt() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U16],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0x1_0005) },
+                        U30Op::TruncU32U16 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U16(5)]);
+    }
+
+    // === I64F64 and F64I64 ===
+    #[test]
+    fn u30x_i64_f64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::I64F64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert!((out.results[0].as_f64().unwrap() - 42.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn u30x_f64_i64() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(42.9) },
+                        U30Op::F64I64 { dst: 1, src: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let out = U30Runtime::default().execute_experimental(&module, &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(42)]); // truncates
+    }
 }
