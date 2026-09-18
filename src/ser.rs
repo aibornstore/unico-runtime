@@ -1901,6 +1901,270 @@ mod tests {
         );
     }
 
+    // === Error path tests for decode functions ===
+
+    #[test]
+    fn test_ser_decode_op_unknown_variant() {
+        // Variant 96 is beyond the known range (0-95) — exercises the _ catch-all
+        let buf = vec![96];
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("unknown op variant"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_value_unknown_type() {
+        // Type 7 is beyond the known range (0-6) — exercises the _ catch-all
+        let buf = vec![7];
+        let mut pos = 0;
+        let err = decode_value(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("unknown value variant"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_binary_op_invalid() {
+        // op_idx 27 is beyond the known range (0-26)
+        let err = decode_binary_op(27).unwrap_err();
+        assert!(err.to_string().contains("unknown binary op"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_terminator_unknown_variant() {
+        // Variant 5 is beyond the known range (Trap=4) — exercises the _ catch-all
+        // Must provide enough bytes after variant to pass truncation checks
+        let buf = vec![5, 0, 0, 0, 0];
+        let mut pos = 0;
+        let err = decode_terminator(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("unknown terminator variant"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_op_truncated_no_fields() {
+        // Variant byte present (0 = Nop) but no data after — Nop has no fields so this works
+        let buf = vec![0];
+        let mut pos = 0;
+        let op = decode_op(&buf, &mut pos).unwrap();
+        assert!(matches!(op, U30Op::Nop));
+    }
+
+    #[test]
+    fn test_ser_decode_op_truncated_variant_byte() {
+        // Empty buffer — cannot read variant byte
+        let buf = vec![];
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_op_truncated_const_fields() {
+        // Variant 1 (Const) but only 1 byte of dst — needs 4 bytes for u32
+        let buf = vec![1, 0x42];
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_op_truncated_const_value_type() {
+        // Variant 1 (Const): dst complete (4 bytes), but no value type byte
+        let buf = vec![1, 0, 0, 0, 0]; // dst=0
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_op_truncated_memcopy() {
+        // Variant 50 (MemCopy): needs 6 x u32 = 24 bytes after variant
+        // Provide only variant + 3 u32s (partial)
+        let buf = vec![50, 0, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3]; // 14 bytes total, 13 after variant
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_value_truncated_u16() {
+        // Type 2 (U16): needs 2 bytes, provide only 1
+        let buf = vec![2, 0x42];
+        let mut pos = 0;
+        let err = decode_value(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_value_truncated_u32() {
+        // Type 3 (U32): needs 4 bytes, provide only 3
+        let buf = vec![3, 0, 0, 0];
+        let mut pos = 0;
+        let err = decode_value(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_value_truncated_u64() {
+        // Type 4 (U64): needs 8 bytes, provide only 7
+        let buf = vec![4, 0, 0, 0, 0, 0, 0, 0];
+        let mut pos = 0;
+        let err = decode_value(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_value_truncated_f32() {
+        // Type 5 (F32): needs 4 bytes, provide only 3
+        let buf = vec![5, 0, 0, 0];
+        let mut pos = 0;
+        let err = decode_value(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_value_truncated_f64() {
+        // Type 6 (F64): needs 8 bytes, provide only 7
+        let buf = vec![6, 0, 0, 0, 0, 0, 0, 0];
+        let mut pos = 0;
+        let err = decode_value(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_terminator_truncated_br() {
+        // Variant 0 (Br): needs 1 u32 (4 bytes), provide 1 byte
+        let buf = vec![0, 0x42];
+        let mut pos = 0;
+        let err = decode_terminator(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_terminator_truncated_brif() {
+        // Variant 1 (BrIf): needs 3 x u32, provide only 2
+        let buf = vec![1, 0, 0, 0, 0, 1, 0, 0, 0, 2]; // 2 complete u32s, need 3
+        let mut pos = 0;
+        let err = decode_terminator(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_terminator_truncated_ret() {
+        // Variant 2 (Ret): count=1 needs 1 value, but truncated
+        // Variant(1) + count=1(4) + 0 bytes for value
+        let buf = vec![2, 1, 0, 0, 0]; // count=1, but no bytes for value
+        let mut pos = 0;
+        let err = decode_terminator(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_terminator_truncated_tailcall() {
+        // Variant 3 (TailCall): count=1 needs 1 arg, but truncated
+        let buf = vec![3, 0, 0, 0, 0, 1]; // fn=0, count=1, no arg bytes
+        let mut pos = 0;
+        let err = decode_terminator(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_op_truncated_binary_op() {
+        // Variant 2 (Binary): dst=0, op_idx=0 (valid), a=0, b truncated
+        let buf = vec![2, 0, 0, 0, 0, 0, 0, 0, 0]; // 9 bytes: dst(4)+op_idx(4)+a(1)
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_op_truncated_call() {
+        // Variant 83 (Call): arg_count=2 needs 2 args, provide 1
+        let mut buf = vec![83]; // variant
+        buf.extend_from_slice(&0u32.to_le_bytes()); // function=0
+        buf.extend_from_slice(&2u32.to_le_bytes()); // arg_count=2
+        buf.extend_from_slice(&0u32.to_le_bytes()); // arg1
+        // missing arg2
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_op_truncated_indirect_call() {
+        // Variant 84 (IndirectCall): arg_count=2 needs 2 args, provide 1
+        let mut buf = vec![84]; // variant
+        buf.extend_from_slice(&0u32.to_le_bytes()); // function_reg=0
+        buf.extend_from_slice(&2u32.to_le_bytes()); // arg_count=2
+        buf.extend_from_slice(&0u32.to_le_bytes()); // arg1
+        // missing arg2
+        let mut pos = 0;
+        let err = decode_op(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_decode_value_u64_roundtrip() {
+        // Type 4 (U64): full 8 bytes — exercise the full path
+        let buf = vec![4, 1, 2, 3, 4, 5, 6, 7, 8];
+        let mut pos = 0;
+        let val = decode_value(&buf, &mut pos).unwrap();
+        assert!(matches!(val, U30Value::U64(0x0807060504030201)));
+    }
+
+    #[test]
+    fn test_ser_decode_value_f64_roundtrip() {
+        // Type 6 (F64): full 8 bytes — exercise the full path
+        let bits: u64 = 0x3FF0000000000000u64; // 1.0
+        let mut buf = vec![6];
+        buf.extend_from_slice(&bits.to_le_bytes());
+        let mut pos = 0;
+        let val = decode_value(&buf, &mut pos).unwrap();
+        assert!(matches!(val, U30Value::F64(f) if f.to_bits() == bits));
+    }
+
+    #[test]
+    fn test_ser_decode_value_bool_roundtrip() {
+        // Type 0 (Bool): full 1 byte
+        let buf = vec![0, 1];
+        let mut pos = 0;
+        let val = decode_value(&buf, &mut pos).unwrap();
+        assert!(matches!(val, U30Value::Bool(true)));
+    }
+
+    #[test]
+    fn test_ser_decode_value_u8_roundtrip() {
+        // Type 1 (U8): full 1 byte
+        let buf = vec![1, 42];
+        let mut pos = 0;
+        let val = decode_value(&buf, &mut pos).unwrap();
+        assert!(matches!(val, U30Value::U8(42)));
+    }
+
+    #[test]
+    fn test_ser_decode_binary_op_valid() {
+        // All valid binary op indices 0-26
+        for idx in 0u32..=26 {
+            decode_binary_op(idx).expect("valid binary op should decode");
+        }
+    }
+
+    #[test]
+    fn test_ser_read_u32_truncated() {
+        let buf = vec![0, 0, 0]; // only 3 bytes, need 4
+        let mut pos = 0;
+        let err = read_u32(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    #[test]
+    fn test_ser_read_u8_truncated() {
+        let buf = vec![];
+        let mut pos = 0;
+        let err = read_u8(&buf, &mut pos).unwrap_err();
+        assert!(err.to_string().contains("truncated"), "got: {}", err);
+    }
+
+    // === End error path tests ===
+
     #[test]
     fn test_ser_truncated() {
         let result = decode(b"U30X");

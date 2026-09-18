@@ -4735,4 +4735,555 @@ mod tests {
         assert_eq!(out.results, vec![U30Value::U64(42)]);
     }
 
+    // T34: Missing binary ops — Le, Min, Max variants
+
+    #[test]
+    fn u30x_binary_le_u64() {
+        let m = |a, b, op: U30BinaryOp| -> U30Module {
+            U30Module {
+                regions: vec![],
+                tables: vec![],
+                functions: vec![U30Function {
+                    params: vec![],
+                    results: vec![U30Type::Bool],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(a) },
+                            U30Op::Const { dst: 1, value: U30Value::U64(b) },
+                            U30Op::Binary { dst: 2, op, a: 0, b: 1 },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![2] },
+                    }],
+                    entry_block: 0,
+                }],
+                entry_function: 0,
+            }
+        };
+        // 5 <= 10
+        let out = U30Runtime::default().execute_experimental(&m(5, 10, U30BinaryOp::LeU64), &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::Bool(true)]);
+        // 10 <= 5
+        let out = U30Runtime::default().execute_experimental(&m(10, 5, U30BinaryOp::LeU64), &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::Bool(false)]);
+    }
+
+    #[test]
+    fn u30x_binary_le_u32() {
+        let m = |a, b, op: U30BinaryOp| -> U30Module {
+            U30Module {
+                regions: vec![],
+                tables: vec![],
+                functions: vec![U30Function {
+                    params: vec![],
+                    results: vec![U30Type::Bool],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U32(a) },
+                            U30Op::Const { dst: 1, value: U30Value::U32(b) },
+                            U30Op::Binary { dst: 2, op, a: 0, b: 1 },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![2] },
+                    }],
+                    entry_block: 0,
+                }],
+                entry_function: 0,
+            }
+        };
+        // 3 <= 7
+        let out = U30Runtime::default().execute_experimental(&m(3, 7, U30BinaryOp::LeU32), &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::Bool(true)]);
+        // 7 <= 3
+        let out = U30Runtime::default().execute_experimental(&m(7, 3, U30BinaryOp::LeU32), &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::Bool(false)]);
+    }
+
+    #[test]
+    fn u30x_binary_min_max() {
+        let m = |a, b, op: U30BinaryOp| -> U30Module {
+            U30Module {
+                regions: vec![],
+                tables: vec![],
+                functions: vec![U30Function {
+                    params: vec![],
+                    results: vec![U30Type::U64],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(a) },
+                            U30Op::Const { dst: 1, value: U30Value::U64(b) },
+                            U30Op::Binary { dst: 2, op, a: 0, b: 1 },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![2] },
+                    }],
+                    entry_block: 0,
+                }],
+                entry_function: 0,
+            }
+        };
+        // MinU64: min(100, 42) = 42
+        let out = U30Runtime::default().execute_experimental(&m(100, 42, U30BinaryOp::MinU64), &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(42)]);
+        // MaxU64: max(100, 42) = 100
+        let out = U30Runtime::default().execute_experimental(&m(100, 42, U30BinaryOp::MaxU64), &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U64(100)]);
+        // MinU32: min(7, 3) = 3
+        let m32 = |a, b, op: U30BinaryOp| -> U30Module {
+            U30Module {
+                regions: vec![],
+                tables: vec![],
+                functions: vec![U30Function {
+                    params: vec![],
+                    results: vec![U30Type::U32],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U32(a) },
+                            U30Op::Const { dst: 1, value: U30Value::U32(b) },
+                            U30Op::Binary { dst: 2, op, a: 0, b: 1 },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![2] },
+                    }],
+                    entry_block: 0,
+                }],
+                entry_function: 0,
+            }
+        };
+        let out = U30Runtime::default().execute_experimental(&m32(7, 3, U30BinaryOp::MinU32), &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U32(3)]);
+        let out = U30Runtime::default().execute_experimental(&m32(7, 3, U30BinaryOp::MaxU32), &[]).unwrap();
+        assert_eq!(out.results, vec![U30Value::U32(7)]);
+    }
+
+    // === Error path tests for exec_op ===
+
+    #[test]
+    fn u30x_store_u8_non_writable_fails() {
+        // StoreU8 to read-only region should fail
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 8, readable: true, writable: false, initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) }, // offset
+                        U30Op::Const { dst: 1, value: U30Value::U8(42) }, // value
+                        U30Op::StoreU8 { region: 0, offset: 0, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("store to non-writable");
+        assert!(err.to_string().contains("not writable"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_store_u16_non_writable_fails() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 8, readable: true, writable: false, initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U16(0xFF) },
+                        U30Op::StoreU16 { region: 0, offset: 0, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("store to non-writable");
+        assert!(err.to_string().contains("not writable"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_store_u32_non_writable_fails() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 8, readable: true, writable: false, initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0xDEADBEEF) },
+                        U30Op::StoreU32 { region: 0, offset: 0, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("store to non-writable");
+        assert!(err.to_string().contains("not writable"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_store_u64_non_writable_fails() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 8, readable: true, writable: false, initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(0xDEADBEEF) },
+                        U30Op::StoreU64 { region: 0, offset: 0, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("store to non-writable");
+        assert!(err.to_string().contains("not writable"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_store_u32_oob_fails() {
+        // StoreU32 at offset 5 in 8-byte region: 5+4=9 > 8
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 8, readable: true, writable: true, initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(5) }, // offset=5, 5+4=9 > 8
+                        U30Op::Const { dst: 1, value: U30Value::U32(0xFF) },
+                        U30Op::StoreU32 { region: 0, offset: 0, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("store u32 OOB");
+        assert!(err.to_string().contains("out of bounds"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_store_u64_oob_exec_fails() {
+        // StoreU64 at offset 1 in 8-byte region: 1+8=9 > 8
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 8, readable: true, writable: true, initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(1) }, // offset=1, 1+8=9 > 8
+                        U30Op::Const { dst: 1, value: U30Value::U64(0xFF) },
+                        U30Op::StoreU64 { region: 0, offset: 0, src: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("store u64 OOB");
+        assert!(err.to_string().contains("out of bounds"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_memcopy_src_not_readable_fails() {
+        // MemCopy from non-readable src region
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 16, readable: false, writable: true, initial: vec![1; 16] },
+                U30RegionDecl { id: 1, size: 16, readable: true, writable: true, initial: vec![0; 16] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) }, // dst_offset
+                        U30Op::Const { dst: 1, value: U30Value::U32(0) }, // src_offset
+                        U30Op::Const { dst: 2, value: U30Value::U32(4) }, // size
+                        U30Op::MemCopy { dst_region: 1, dst_offset: 0, src_region: 0, src_offset: 0, size: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("memcopy from non-readable");
+        assert!(err.to_string().contains("not readable"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_memcopy_dst_not_writable_fails() {
+        // MemCopy to non-writable dst region
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: vec![1; 16] },
+                U30RegionDecl { id: 1, size: 16, readable: true, writable: false, initial: vec![0; 16] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 2, value: U30Value::U32(4) },
+                        U30Op::MemCopy { dst_region: 1, dst_offset: 0, src_region: 0, src_offset: 0, size: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("memcopy to non-writable");
+        assert!(err.to_string().contains("not writable"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_memcopy_missing_dst_region_fails() {
+        // MemCopy to non-existent dst region
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: vec![1; 16] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 2, value: U30Value::U32(4) },
+                        U30Op::MemCopy { dst_region: 99, dst_offset: 0, src_region: 0, src_offset: 0, size: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("memcopy to missing region");
+        assert!(err.to_string().contains("unknown") || err.to_string().contains("missing"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_memcopy_missing_src_region_fails() {
+        // MemCopy from non-existent src region
+        let module = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: vec![1; 16] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0) },
+                        U30Op::Const { dst: 2, value: U30Value::U32(4) },
+                        U30Op::MemCopy { dst_region: 0, dst_offset: 0, src_region: 99, src_offset: 0, size: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("memcopy from missing region");
+        assert!(err.to_string().contains("unknown") || err.to_string().contains("missing"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_memfill_non_writable_fails() {
+        // MemFill on read-only region
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 8, readable: true, writable: false, initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) }, // offset
+                        U30Op::Const { dst: 1, value: U30Value::U32(0xAB) }, // value
+                        U30Op::Const { dst: 2, value: U30Value::U64(4) }, // size
+                        U30Op::MemFill { region: 0, offset: 0, value: 1, size: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("memfill non-writable");
+        assert!(err.to_string().contains("not writable"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_memfill_missing_region_fails() {
+        // MemFill on non-existent region
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 8, readable: true, writable: true, initial: vec![0; 8],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0xAB) },
+                        U30Op::Const { dst: 2, value: U30Value::U64(4) },
+                        U30Op::MemFill { region: 99, offset: 0, value: 1, size: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("memfill missing region");
+        assert!(err.to_string().contains("unknown") || err.to_string().contains("missing"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_memsize_missing_region_fails() {
+        // MemSize on non-existent region
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemSize { dst: 0, region: 99 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![0] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("memsize missing region");
+        assert!(err.to_string().contains("unknown") || err.to_string().contains("missing"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_memgrow_missing_region_fails() {
+        // MemGrow on non-existent region
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(4096) },
+                        U30Op::MemGrow { dst: 1, region: 99, delta: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("memgrow missing region");
+        assert!(err.to_string().contains("unknown") || err.to_string().contains("missing"), "got: {}", err);
+    }
+
+    #[test]
+    fn u30x_binary_eq_type_mismatch_fails() {
+        // Eq with different types should fail
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(42) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(42) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::Eq, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let err = U30Runtime::default()
+            .execute_experimental(&module, &[])
+            .expect_err("eq type mismatch");
+        assert!(err.to_string().contains("type mismatch"), "got: {}", err);
+    }
+
+    // === End error path tests ===
 }
