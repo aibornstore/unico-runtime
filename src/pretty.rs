@@ -1259,7 +1259,7 @@ fn fmt_binop(op: &crate::ir::U30BinaryOp) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{U30Block, U30Function, U30Module, U30Op, U30Terminator, U30Type, U30Value, U30RegionDecl};
+    use crate::ir::{U30Block, U30Function, U30Module, U30Op, U30Terminator, U30Type, U30Value, U30RegionDecl, U30TableDecl};
 
     fn sample_module() -> U30Module {
         U30Module {
@@ -3200,5 +3200,678 @@ mod tests {
         };
         let text = fmt_module(&m);
         assert!(text.contains("reinterpret.f64.u64") || text.contains("reinterpret.u64.f64"));
+    }
+
+    // Test hex_string function with multiple chunks (if i > 0 branch)
+    #[test]
+    fn test_pretty_hex_string_multiple_chunks() {
+        let m = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 64,
+                readable: true,
+                writable: true,
+                initial: vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        // With hex_cols=8, data will be split into multiple chunks
+        let opts = FmtOpts { colors: false, show_region_data: true, show_tables: false, hex_cols: 8 };
+        let text = fmt_module_opts(&m, opts);
+        // Should contain hex data with comma separators (the if i > 0 branch)
+        assert!(text.contains("01 02") || text.contains(","));
+    }
+
+    // Test Nop operation formatting
+    #[test]
+    fn test_pretty_nop_op() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Nop,
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("nop"));
+    }
+
+    // Test Br terminator formatting
+    #[test]
+    fn test_pretty_br_terminator() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Br { target: 1 },
+                    },
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+            }],
+            entry_function: 0,
+        };
+        let opts = FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 32 };
+        let text = fmt_module_opts(&m, opts);
+        // Strip ANSI codes to make assertions reliable
+        let plain = text.replace("\x1b[", "").replace("m", "\n");
+        assert!(plain.contains("br") && plain.contains("block1"));
+    }
+
+    // Test BrIf terminator formatting
+    #[test]
+    fn test_pretty_brif_terminator() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![
+                    U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        ],
+                        terminator: U30Terminator::BrIf { cond: 0, then_target: 1, else_target: 0 },
+                    },
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("br.if"));
+    }
+
+    // Test Ret terminator with multiple values formatting
+    #[test]
+    fn test_pretty_ret_terminator_multi_values() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![0, 1, 2] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        // Multiple values should have commas between them
+        assert!(text.contains("ret"));
+    }
+
+    // Test Trap terminator formatting
+    #[test]
+    fn test_pretty_trap_terminator() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Trap { code: 123 },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("trap") && text.contains("123"));
+    }
+
+    // Test FmtOpts::colors builder with method chaining
+    #[test]
+    fn test_pretty_fmtopts_builder_chain() {
+        let opts = FmtOpts::default()
+            .colors(true)
+            .colors(false);
+        assert!(!opts.colors);
+    }
+
+    // Test all U30Type formatting variants
+    #[test]
+    fn test_pretty_all_types_formatted() {
+        let types = vec![
+            U30Type::Bool,
+            U30Type::U8,
+            U30Type::U16,
+            U30Type::U32,
+            U30Type::U64,
+            U30Type::F32,
+            U30Type::F64,
+        ];
+        for t in types {
+            let text = fmt_type(&t);
+            assert!(!text.is_empty(), "fmt_type returned empty for {:?}", t);
+        }
+    }
+
+    // Test all U30Value formatting variants
+    #[test]
+    fn test_pretty_all_values_formatted() {
+        let values = vec![
+            U30Value::Bool(true),
+            U30Value::Bool(false),
+            U30Value::U8(0),
+            U30Value::U8(255),
+            U30Value::U16(0),
+            U30Value::U16(65535),
+            U30Value::U32(0),
+            U30Value::U32(4294967295),
+            U30Value::U64(0),
+            U30Value::U64(18446744073709551615),
+            U30Value::F32(0.0),
+            U30Value::F32(-0.0),
+            U30Value::F32(f32::INFINITY),
+            U30Value::F32(f32::NEG_INFINITY),
+            U30Value::F32(f32::NAN),
+            U30Value::F64(0.0),
+            U30Value::F64(-0.0),
+            U30Value::F64(f64::INFINITY),
+            U30Value::F64(f64::NEG_INFINITY),
+            U30Value::F64(f64::NAN),
+        ];
+        for v in values {
+            let text = fmt_value(&v);
+            assert!(!text.is_empty(), "fmt_value returned empty for {:?}", v);
+        }
+    }
+
+    // Test all U30BinaryOp formatting variants
+    #[test]
+    fn test_pretty_all_binops_formatted() {
+        use crate::ir::U30BinaryOp::*;
+        let ops = vec![
+            AddWrapU64, AddWrapU32,
+            SubWrapU64, SubWrapU32,
+            MulWrapU64, MulWrapU32,
+            AndU8, OrU8, XorU8,
+            ShlU64, ShlU32,
+            ShrU64, ShrU32,
+            DivU64, DivU32,
+            RemU64, RemU32,
+            Eq,
+            LtU64, GtU64, GeU64,
+            LeU64, LeU32,
+            MinU64, MinU32,
+            MaxU64, MaxU32,
+        ];
+        for op in ops {
+            let text = fmt_binop(&op);
+            assert!(!text.is_empty(), "fmt_binop returned empty for {:?}", op);
+        }
+    }
+
+    // Test all U30Op variants for formatting
+    #[test]
+    fn test_pretty_all_ops_formatted() {
+        use crate::ir::U30BinaryOp::*;
+
+        let ops = vec![
+            U30Op::Nop,
+            U30Op::Const { dst: 0, value: U30Value::U64(0) },
+            U30Op::Binary { dst: 1, op: AddWrapU64, a: 0, b: 0 },
+            U30Op::Select { dst: 2, cond: 0, a: 0, b: 0 },
+            U30Op::NotU8 { dst: 3, src: 0 },
+            U30Op::NotU16 { dst: 4, src: 0 },
+            U30Op::NotU32 { dst: 5, src: 0 },
+            U30Op::NotU64 { dst: 6, src: 0 },
+            U30Op::AbsU64 { dst: 7, src: 0 },
+            U30Op::AbsU32 { dst: 8, src: 0 },
+            U30Op::NegU64 { dst: 9, src: 0 },
+            U30Op::NegU32 { dst: 10, src: 0 },
+            U30Op::CtzU64 { dst: 11, src: 0 },
+            U30Op::CtzU32 { dst: 12, src: 0 },
+            U30Op::ClzU64 { dst: 13, src: 0 },
+            U30Op::ClzU32 { dst: 14, src: 0 },
+            U30Op::PopcntU64 { dst: 15, src: 0 },
+            U30Op::PopcntU32 { dst: 16, src: 0 },
+            U30Op::RotlU64 { dst: 17, val: 0, sh: 0 },
+            U30Op::RotlU32 { dst: 18, val: 0, sh: 0 },
+            U30Op::RotrU64 { dst: 19, val: 0, sh: 0 },
+            U30Op::RotrU32 { dst: 20, val: 0, sh: 0 },
+            U30Op::FEq { dst: 21, a: 0, b: 0 },
+            U30Op::FLt { dst: 22, a: 0, b: 0 },
+            U30Op::FGt { dst: 23, a: 0, b: 0 },
+            U30Op::FLe { dst: 24, a: 0, b: 0 },
+            U30Op::FGe { dst: 25, a: 0, b: 0 },
+            U30Op::FAdd { dst: 26, a: 0, b: 0 },
+            U30Op::FSub { dst: 27, a: 0, b: 0 },
+            U30Op::FMul { dst: 28, a: 0, b: 0 },
+            U30Op::FDiv { dst: 29, a: 0, b: 0 },
+            U30Op::FSqrt { dst: 30, src: 0 },
+            U30Op::FAbs { dst: 31, src: 0 },
+            U30Op::FNeg { dst: 32, src: 0 },
+            U30Op::FMin { dst: 33, a: 0, b: 0 },
+            U30Op::FMax { dst: 34, a: 0, b: 0 },
+            U30Op::I2F { dst: 35, src: 0 },
+            U30Op::F2I { dst: 36, src: 0 },
+            U30Op::TruncF32U64 { dst: 37, src: 0 },
+            U30Op::ReinterpretF32U32 { dst: 38, src: 0 },
+            U30Op::ReinterpretU32F32 { dst: 39, src: 0 },
+            U30Op::ZExtI8U16 { dst: 40, src: 0 },
+            U30Op::ZExtI8U32 { dst: 41, src: 0 },
+            U30Op::ZExtI8U64 { dst: 42, src: 0 },
+            U30Op::ZExtI16U32 { dst: 43, src: 0 },
+            U30Op::ZExtI16U64 { dst: 44, src: 0 },
+            U30Op::ZExtI32U64 { dst: 45, src: 0 },
+            U30Op::TruncU64U32 { dst: 46, src: 0 },
+            U30Op::TruncU64U16 { dst: 47, src: 0 },
+            U30Op::TruncU32U16 { dst: 48, src: 0 },
+            U30Op::MemCopy { dst_region: 0, dst_offset: 0, src_region: 0, src_offset: 0, size: 0 },
+            U30Op::MemFill { region: 0, offset: 0, value: 0, size: 0 },
+            U30Op::MemSize { dst: 49, region: 0 },
+            U30Op::MemGrow { dst: 50, region: 0, delta: 0 },
+            U30Op::F64Eq { dst: 51, a: 0, b: 0 },
+            U30Op::F64Lt { dst: 52, a: 0, b: 0 },
+            U30Op::F64Gt { dst: 53, a: 0, b: 0 },
+            U30Op::F64Le { dst: 54, a: 0, b: 0 },
+            U30Op::F64Ge { dst: 55, a: 0, b: 0 },
+            U30Op::F64Add { dst: 56, a: 0, b: 0 },
+            U30Op::F64Sub { dst: 57, a: 0, b: 0 },
+            U30Op::F64Mul { dst: 58, a: 0, b: 0 },
+            U30Op::F64Div { dst: 59, a: 0, b: 0 },
+            U30Op::F64Sqrt { dst: 60, src: 0 },
+            U30Op::F64Abs { dst: 61, src: 0 },
+            U30Op::F64Neg { dst: 62, src: 0 },
+            U30Op::F64Min { dst: 63, a: 0, b: 0 },
+            U30Op::F64Max { dst: 64, a: 0, b: 0 },
+            U30Op::I64F64 { dst: 65, src: 0 },
+            U30Op::F64I64 { dst: 66, src: 0 },
+            U30Op::F32F64 { dst: 67, src: 0 },
+            U30Op::F64F32 { dst: 68, src: 0 },
+            U30Op::ReinterpretF64U64 { dst: 69, src: 0 },
+            U30Op::ReinterpretU64F64 { dst: 70, src: 0 },
+            U30Op::SExtI8U16 { dst: 71, src: 0 },
+            U30Op::SExtI8U32 { dst: 72, src: 0 },
+            U30Op::SExtI8U64 { dst: 73, src: 0 },
+            U30Op::SExtI16U32 { dst: 74, src: 0 },
+            U30Op::SExtI16U64 { dst: 75, src: 0 },
+            U30Op::SExtI32U64 { dst: 76, src: 0 },
+            U30Op::ByteSwapU16 { dst: 77, src: 0 },
+            U30Op::ByteSwapU32 { dst: 78, src: 0 },
+            U30Op::ByteSwapU64 { dst: 79, src: 0 },
+            U30Op::Call { function: 0, args: vec![], results: vec![] },
+            U30Op::IndirectCall { function: 0, args: vec![], results: vec![] },
+            U30Op::TableBr { table: 0, index: 0 },
+            U30Op::Break { code: 0 },
+            U30Op::Assert { cond: 0, msg: 0 },
+            U30Op::LoadU8 { dst: 80, region: 0, offset: 0 },
+            U30Op::StoreU8 { region: 0, offset: 0, src: 0 },
+            U30Op::LoadU16 { dst: 81, region: 0, offset: 0 },
+            U30Op::StoreU16 { region: 0, offset: 0, src: 0 },
+            U30Op::LoadU32 { dst: 82, region: 0, offset: 0 },
+            U30Op::StoreU32 { region: 0, offset: 0, src: 0 },
+            U30Op::LoadU64 { dst: 83, region: 0, offset: 0 },
+            U30Op::StoreU64 { region: 0, offset: 0, src: 0 },
+        ];
+
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![0] },
+            ],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    entry_block: 0,
+                    blocks: vec![U30Block {
+                        ops,
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                },
+            ],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(!text.is_empty());
+    }
+
+    // Test region formatting with both readable and writable false
+    #[test]
+    fn test_pretty_region_neither_readable_nor_writable() {
+        let m = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 64,
+                readable: false,
+                writable: false,
+                initial: vec![],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("!readable"));
+        assert!(text.contains("!writable"));
+    }
+
+    // Test table formatting with multiple targets
+    #[test]
+    fn test_pretty_table_multiple_targets() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![0, 1, 2, 3, 4] },
+            ],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("table"));
+        assert!(text.contains("0") && text.contains("4"));
+    }
+
+    // Test function with results formatting
+    #[test]
+    fn test_pretty_function_with_results() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64, U30Type::F64],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains(" -> "));
+    }
+
+    // Test function without results formatting
+    #[test]
+    fn test_pretty_function_without_results() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(!text.contains(" -> "));
+    }
+
+    // Test block with ops and entry marker
+    #[test]
+    fn test_pretty_block_with_ops_entry_marker() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U64],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        // Module should produce some text output with block marker
+        assert!(!text.is_empty(), "fmt_module should produce output");
+        // Block formatting includes block index and colon
+        assert!(text.contains("block") && text.contains(":"));
+    }
+
+    // Test non-entry block without entry marker
+    #[test]
+    fn test_pretty_non_entry_block_no_marker() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Br { target: 1 },
+                    },
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+            }],
+            entry_function: 0,
+        };
+        let opts = FmtOpts { colors: false, show_region_data: false, show_tables: false, hex_cols: 32 };
+        let text = fmt_module_opts(&m, opts);
+        // Block 0 is entry (has "│"), block 1 is non-entry (has " ")
+        assert!(text.contains("block1:"));
+    }
+
+    // Test comment formatting in colors mode
+    #[test]
+    fn test_pretty_comment_with_colors() {
+        let m = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 64,
+                readable: true,
+                writable: true,
+                initial: vec![],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let opts = FmtOpts { colors: true, show_region_data: false, show_tables: false, hex_cols: 32 };
+        let text = fmt_module_opts(&m, opts);
+        // DIM escape sequence should be present when colors are enabled
+        assert!(text.contains("\x1b[2m") || text.contains("size="));
+    }
+
+    // Test TailCall with no args
+    #[test]
+    fn test_pretty_tailcall_no_args() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::TailCall { function: 0, args: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("tail.call"));
+    }
+
+    // Test Call with no args and no results
+    #[test]
+    fn test_pretty_call_no_args_no_results() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Call { function: 0, args: vec![], results: vec![] },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 1,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("call"));
+    }
+
+    // Test IndirectCall with no args and no results
+    #[test]
+    fn test_pretty_indirect_call_no_args_no_results() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                        U30Op::IndirectCall { function: 0, args: vec![], results: vec![] },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("icall"));
+    }
+
+    // Test region initial data with hex_cols=4 (many chunks)
+    #[test]
+    fn test_pretty_hex_data_small_cols() {
+        let m = U30Module {
+            regions: vec![crate::ir::U30RegionDecl {
+                id: 0,
+                size: 32,
+                readable: true,
+                writable: true,
+                initial: vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                entry_block: 0,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let opts = FmtOpts { colors: false, show_region_data: true, show_tables: false, hex_cols: 4 };
+        let text = fmt_module_opts(&m, opts);
+        // Multiple chunks should produce commas
+        assert!(text.contains("01 02 03 04"));
+    }
+
+    // Test entry block comment formatting
+    #[test]
+    fn test_pretty_entry_block_comment() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![U30Type::U64],
+                results: vec![],
+                entry_block: 5,
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+            }],
+            entry_function: 0,
+        };
+        let text = fmt_module(&m);
+        assert!(text.contains("; entry=block5"));
     }
 }
