@@ -6047,4 +6047,635 @@ mod tests {
         let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
         dbg.run_to_completion().unwrap();
     }
+
+    // === execute_op: uncovered match arms ===
+
+    // Batch 1: Float conversions and reinterpret ops
+    #[test]
+    fn test_debugger_execute_fconv_and_reinterpret() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        // I64F64: convert u64=42 to f64=42.0 (I64F64 reads as_u64 from register)
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::I64F64 { dst: 1, src: 0 },
+                        // F64I64: convert f64=42.0 back to u64=42
+                        U30Op::F64I64 { dst: 2, src: 1 },
+                        // F32F64: convert f32=3.14 to f64=3.14
+                        U30Op::Const { dst: 3, value: U30Value::F32(3.14) },
+                        U30Op::F32F64 { dst: 4, src: 3 },
+                        // F64F32: convert f64=3.14 back to f32
+                        U30Op::F64F32 { dst: 5, src: 4 },
+                        // ReinterpretF64U64: bits of 42.0 as u64
+                        U30Op::Const { dst: 6, value: U30Value::U64(42) },
+                        U30Op::ReinterpretU64F64 { dst: 7, src: 6 },
+                        // ReinterpretF64U64: back to u64
+                        U30Op::ReinterpretF64U64 { dst: 8, src: 7 },
+                        // ReinterpretF32U32: bits of 1.5 as u32
+                        U30Op::Const { dst: 9, value: U30Value::U32(0x3FC00000) },
+                        U30Op::ReinterpretU32F32 { dst: 10, src: 9 },
+                        // ReinterpretF32U32: back to u32
+                        U30Op::ReinterpretF32U32 { dst: 11, src: 10 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let r2 = dbg.state.regs.get(&2);
+        let r8 = dbg.state.regs.get(&8);
+        let r11 = dbg.state.regs.get(&11);
+        assert!(matches!(r2, Some(U30Value::U64(v)) if *v == 42), "F64I64: got {:?}", r2);
+        assert!(matches!(r8, Some(U30Value::U64(_))), "ReinterpretF64U64: got {:?}", r8);
+        assert!(matches!(r11, Some(U30Value::U32(0x3FC00000))), "ReinterpretF32U32 roundtrip: got {:?}", r11);
+    }
+
+    // Batch 2: Unary int ops (Abs, Neg, Ctz, Clz, Popcnt)
+    #[test]
+    fn test_debugger_execute_unary_int_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        // AbsU64: abs(-100)
+                        U30Op::Const { dst: 0, value: U30Value::U64(100) },
+                        U30Op::AbsU64 { dst: 1, src: 0 },
+                        // AbsU32: abs(-50)
+                        U30Op::Const { dst: 2, value: U30Value::U32(50) },
+                        U30Op::AbsU32 { dst: 3, src: 2 },
+                        // NegU64: negate 5
+                        U30Op::Const { dst: 4, value: U30Value::U64(5) },
+                        U30Op::NegU64 { dst: 5, src: 4 },
+                        // NegU32: negate 10
+                        U30Op::Const { dst: 6, value: U30Value::U32(10) },
+                        U30Op::NegU32 { dst: 7, src: 6 },
+                        // CtzU64: count trailing zeros of 8 (binary 1000)
+                        U30Op::Const { dst: 8, value: U30Value::U64(8) },
+                        U30Op::CtzU64 { dst: 9, src: 8 },
+                        // CtzU32: count trailing zeros of 4 (binary 100)
+                        U30Op::Const { dst: 10, value: U30Value::U32(4) },
+                        U30Op::CtzU32 { dst: 11, src: 10 },
+                        // ClzU64: count leading zeros of 1
+                        U30Op::Const { dst: 12, value: U30Value::U64(1) },
+                        U30Op::ClzU64 { dst: 13, src: 12 },
+                        // ClzU32: count leading zeros of 1
+                        U30Op::Const { dst: 14, value: U30Value::U32(1) },
+                        U30Op::ClzU32 { dst: 15, src: 14 },
+                        // PopcntU64: popcount of 0xFF = 8
+                        U30Op::Const { dst: 16, value: U30Value::U64(0xFF) },
+                        U30Op::PopcntU64 { dst: 17, src: 16 },
+                        // PopcntU32: popcount of 0xF0F0 = 8
+                        U30Op::Const { dst: 18, value: U30Value::U32(0xF0F0) },
+                        U30Op::PopcntU32 { dst: 19, src: 18 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![19] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let r1 = dbg.state.regs.get(&1);
+        let r5 = dbg.state.regs.get(&5);
+        let r9 = dbg.state.regs.get(&9);
+        let r13 = dbg.state.regs.get(&13);
+        let r17 = dbg.state.regs.get(&17);
+        assert!(matches!(r1, Some(U30Value::U64(100))), "AbsU64(100)=100: got {:?}", r1);
+        assert!(matches!(r5, Some(U30Value::U64(0xFFFF_FFFF_FFFF_FFFB))), "NegU64(5) wraps: got {:?}", r5);
+        assert!(matches!(r9, Some(U30Value::U64(3))), "CtzU64(8)=3: got {:?}", r9);
+        assert!(matches!(r13, Some(U30Value::U64(63))), "ClzU64(1)=63: got {:?}", r13);
+        assert!(matches!(r17, Some(U30Value::U64(8))), "PopcntU64(0xFF)=8: got {:?}", r17);
+    }
+
+    // Batch 3: Rotation and byte-swap ops
+    #[test]
+    fn test_debugger_execute_rotate_and_bswap() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U16],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        // RotlU64: rotl 0x123456789ABCDEF0 by 8 = 0x3456789ABCDEF012
+                        U30Op::Const { dst: 0, value: U30Value::U64(0x123456789ABCDEF0u64) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(8) },
+                        U30Op::RotlU64 { dst: 2, val: 0, sh: 1 },
+                        // RotrU64: rotr 0x123456789ABCDEF0 by 8 = 0xF0DEBC9A78563412
+                        U30Op::RotrU64 { dst: 3, val: 0, sh: 1 },
+                        // RotlU32: rotl 0x12345678 by 4 = 0x23456781
+                        U30Op::Const { dst: 4, value: U30Value::U32(0x12345678) },
+                        U30Op::Const { dst: 5, value: U30Value::U32(4) },
+                        U30Op::RotlU32 { dst: 6, val: 4, sh: 5 },
+                        // RotrU32: rotr 0x12345678 by 4 = 0x81234567
+                        U30Op::RotrU32 { dst: 7, val: 4, sh: 5 },
+                        // ByteSwapU64: swap_bytes 0x123456789ABCDEF0 = 0x3412DEBC9A78F0DE
+                        U30Op::Const { dst: 8, value: U30Value::U64(0x123456789ABCDEF0u64) },
+                        U30Op::ByteSwapU64 { dst: 9, src: 8 },
+                        // ByteSwapU32: swap_bytes 0x12345678 = 0x78563412
+                        U30Op::Const { dst: 10, value: U30Value::U32(0x12345678) },
+                        U30Op::ByteSwapU32 { dst: 11, src: 10 },
+                        // ByteSwapU16: swap_bytes 0x1234 = 0x3412
+                        U30Op::Const { dst: 12, value: U30Value::U16(0x1234) },
+                        U30Op::ByteSwapU16 { dst: 13, src: 12 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![13] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let r2 = dbg.state.regs.get(&2);
+        let r3 = dbg.state.regs.get(&3);
+        let r9 = dbg.state.regs.get(&9);
+        let r11 = dbg.state.regs.get(&11);
+        let r13 = dbg.state.regs.get(&13);
+        assert!(matches!(r2, Some(U30Value::U64(0x3456789ABCDEF012u64))), "RotlU64: got {:?}", r2);
+        assert!(matches!(r3, Some(U30Value::U64(17298946664678735070))), "RotrU64: got {:?}", r3);
+        assert!(matches!(r9, Some(U30Value::U64(17356517385562371090u64))), "ByteSwapU64: got {:?}", r9);
+        assert!(matches!(r11, Some(U30Value::U32(0x78563412))), "ByteSwapU32: got {:?}", r11);
+        assert!(matches!(r13, Some(U30Value::U16(0x3412))), "ByteSwapU16: got {:?}", r13);
+    }
+
+    // Batch 4: Sign extension ops
+    #[test]
+    fn test_debugger_execute_sext_ops() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U16],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        // SExtI8U64: sign-ext u8=0xFF (-1) to u64 = 0xFFFFFFFFFFFFFFFF
+                        U30Op::Const { dst: 0, value: U30Value::U8(0xFF) },
+                        U30Op::SExtI8U64 { dst: 1, src: 0 },
+                        // SExtI8U32: sign-ext u8=0xFF (-1) to u32 = 0xFFFFFFFF
+                        U30Op::Const { dst: 2, value: U30Value::U8(0xFF) },
+                        U30Op::SExtI8U32 { dst: 3, src: 2 },
+                        // SExtI8U16: sign-ext u8=0xFF (-1) to u16 = 0xFFFF
+                        U30Op::Const { dst: 4, value: U30Value::U8(0xFF) },
+                        U30Op::SExtI8U16 { dst: 5, src: 4 },
+                        // SExtI16U32: sign-ext u16=0x8000 (-32768) to u32 = 0xFFFF8000
+                        U30Op::Const { dst: 6, value: U30Value::U16(0x8000) },
+                        U30Op::SExtI16U32 { dst: 7, src: 6 },
+                        // SExtI16U64: sign-ext u16=0x8000 to u64
+                        U30Op::Const { dst: 8, value: U30Value::U16(0x8000) },
+                        U30Op::SExtI16U64 { dst: 9, src: 8 },
+                        // SExtI32U64: sign-ext u32=0x80000000 to u64
+                        U30Op::Const { dst: 10, value: U30Value::U32(0x80000000) },
+                        U30Op::SExtI32U64 { dst: 11, src: 10 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![11] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let r1 = dbg.state.regs.get(&1);
+        let r3 = dbg.state.regs.get(&3);
+        let r5 = dbg.state.regs.get(&5);
+        let r7 = dbg.state.regs.get(&7);
+        let r9 = dbg.state.regs.get(&9);
+        let r11 = dbg.state.regs.get(&11);
+        // SExtI8U64: u8=0xFF → -1 as i8 → 0xFFFFFFFFFFFFFFFF
+        assert!(matches!(r1, Some(U30Value::U64(0xFFFFFFFFFFFFFFFFu64))), "SExtI8U64(0xFF)=-1: got {:?}", r1);
+        // SExtI8U32: u8=0xFF → 0xFFFFFFFF
+        assert!(matches!(r3, Some(U30Value::U32(0xFFFFFFFF))), "SExtI8U32(0xFF)=-1: got {:?}", r3);
+        // SExtI8U16: u8=0xFF → 0xFFFF
+        assert!(matches!(r5, Some(U30Value::U16(0xFFFF))), "SExtI8U16(0xFF)=-1: got {:?}", r5);
+        // SExtI16U32: u16=0x8000 → 0xFFFF8000
+        assert!(matches!(r7, Some(U30Value::U32(0xFFFF8000))), "SExtI16U32(0x8000): got {:?}", r7);
+        // SExtI16U64: u16=0x8000 → 0xFFFFFFFFFFFF8000
+        assert!(matches!(r9, Some(U30Value::U64(0xFFFFFFFFFFFF8000u64))), "SExtI16U64(0x8000): got {:?}", r9);
+        // SExtI32U64: u32=0x80000000 → 0xFFFFFFFF80000000
+        assert!(matches!(r11, Some(U30Value::U64(0xFFFFFFFF80000000u64))), "SExtI32U64(0x80000000): got {:?}", r11);
+    }
+
+    // Batch 5: Zero extension and truncation ops
+    #[test]
+    fn test_debugger_execute_zext_and_trunc() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        // ZExtI8U64: zero-ext u8=0xFF to u64 = 255
+                        U30Op::Const { dst: 0, value: U30Value::U8(0xFF) },
+                        U30Op::ZExtI8U64 { dst: 1, src: 0 },
+                        // ZExtI8U32: zero-ext u8=0xFF to u32 = 255
+                        U30Op::Const { dst: 2, value: U30Value::U8(0xFF) },
+                        U30Op::ZExtI8U32 { dst: 3, src: 2 },
+                        // ZExtI8U16: zero-ext u8=0xFF to u16 = 255
+                        U30Op::Const { dst: 4, value: U30Value::U8(0xFF) },
+                        U30Op::ZExtI8U16 { dst: 5, src: 4 },
+                        // ZExtI16U32: zero-ext u16=0xFFFF to u32
+                        U30Op::Const { dst: 6, value: U30Value::U16(0xFFFF) },
+                        U30Op::ZExtI16U32 { dst: 7, src: 6 },
+                        // ZExtI16U64: zero-ext u16=0xFFFF to u64
+                        U30Op::Const { dst: 8, value: U30Value::U16(0xFFFF) },
+                        U30Op::ZExtI16U64 { dst: 9, src: 8 },
+                        // ZExtI32U64: zero-ext u32=0xFFFFFFFF to u64
+                        U30Op::Const { dst: 10, value: U30Value::U32(0xFFFFFFFF) },
+                        U30Op::ZExtI32U64 { dst: 11, src: 10 },
+                        // TruncU64U32: truncate 0x123456789ABC to 0x56789ABC
+                        U30Op::Const { dst: 12, value: U30Value::U64(0x123456789ABC) },
+                        U30Op::TruncU64U32 { dst: 13, src: 12 },
+                        // TruncU64U16: truncate 0x123456789ABC to 0x9ABC
+                        U30Op::TruncU64U16 { dst: 14, src: 12 },
+                        // TruncU32U16: truncate 0xFEDC to 0xEDC
+                        U30Op::Const { dst: 15, value: U30Value::U32(0xFEDC) },
+                        U30Op::TruncU32U16 { dst: 16, src: 15 },
+                        // TruncF32U64: truncate f32=3.7 to u64=3
+                        U30Op::Const { dst: 17, value: U30Value::F32(3.7) },
+                        U30Op::TruncF32U64 { dst: 18, src: 17 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![18] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let r1 = dbg.state.regs.get(&1);
+        let r5 = dbg.state.regs.get(&5);
+        let r7 = dbg.state.regs.get(&7);
+        let r11 = dbg.state.regs.get(&11);
+        let r13 = dbg.state.regs.get(&13);
+        let r14 = dbg.state.regs.get(&14);
+        let r18 = dbg.state.regs.get(&18);
+        assert!(matches!(r1, Some(U30Value::U64(255))), "ZExtI8U64(0xFF)=255: got {:?}", r1);
+        assert!(matches!(r5, Some(U30Value::U16(255))), "ZExtI8U16(0xFF)=255: got {:?}", r5);
+        assert!(matches!(r7, Some(U30Value::U32(0xFFFF))), "ZExtI16U32(0xFFFF): got {:?}", r7);
+        assert!(matches!(r11, Some(U30Value::U64(0xFFFFFFFF))), "ZExtI32U64(0xFFFFFFFF): got {:?}", r11);
+        assert!(matches!(r13, Some(U30Value::U32(0x56789ABC))), "TruncU64U32: got {:?}", r13);
+        assert!(matches!(r14, Some(U30Value::U16(0x9ABC))), "TruncU64U16: got {:?}", r14);
+        assert!(matches!(r18, Some(U30Value::U64(3))), "TruncF32U64(3.7)=3: got {:?}", r18);
+    }
+
+    // Batch 6: Memory store success paths (happy path)
+    #[test]
+    fn test_debugger_execute_store_success() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl {
+                id: 0, size: 16, readable: true, writable: true, initial: vec![0; 16],
+            }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![], // no results
+                blocks: vec![U30Block {
+                    ops: vec![
+                        // StoreU8: offset from r0, value from r1
+                        U30Op::Const { dst: 0, value: U30Value::U64(5) },   // offset
+                        U30Op::Const { dst: 1, value: U30Value::U8(0xAB) },  // value
+                        U30Op::StoreU8 { region: 0, offset: 0, src: 1 },
+                        // StoreU16: offset from r2, value from r3
+                        U30Op::Const { dst: 2, value: U30Value::U64(3) },    // offset
+                        U30Op::Const { dst: 3, value: U30Value::U16(0x1234) }, // value
+                        U30Op::StoreU16 { region: 0, offset: 2, src: 3 },
+                        // StoreU32: offset from r4, value from r5
+                        U30Op::Const { dst: 4, value: U30Value::U64(7) },    // offset
+                        U30Op::Const { dst: 5, value: U30Value::U32(0xDEADBEEF) }, // value
+                        U30Op::StoreU32 { region: 0, offset: 4, src: 5 },
+                        // StoreU64: offset from r6, value from r7
+                        U30Op::Const { dst: 6, value: U30Value::U64(0) },    // offset
+                        U30Op::Const { dst: 7, value: U30Value::U64(0xCAFEBABE_DEADBEEFu64) }, // value
+                        U30Op::StoreU64 { region: 0, offset: 6, src: 7 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+    }
+
+    // Batch 7: Call op (valid function call)
+    #[test]
+    fn test_debugger_execute_call_op() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![], // fn 0 has no results
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U32(99) },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] }, // no return values
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![], // fn 1 has no results
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            // Call fn 0 (no args, no results captured)
+                            U30Op::Call { function: 0, args: vec![], results: vec![] },
+                            U30Op::Const { dst: 0, value: U30Value::U32(42) },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] }, // no return values
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 1,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        // Just verify the call completes without error
+        let r = dbg.state.regs.get(&0);
+        assert!(matches!(r, Some(U30Value::U32(42))), "Call then Const: got {:?}", r);
+    }
+
+    // Batch 8: IndirectCall op
+    #[test]
+    fn test_debugger_execute_indirect_call() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![], // fn 0 has no results
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] }, // no return values
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![], // fn 1 has no results
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(0) }, // fn idx register
+                            U30Op::IndirectCall { function: 0, args: vec![], results: vec![] },
+                            U30Op::Const { dst: 2, value: U30Value::U64(99) },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] }, // no return values
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 1,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let r = dbg.state.regs.get(&2);
+        assert!(matches!(r, Some(U30Value::U64(99))), "IndirectCall then Const: got {:?}", r);
+    }
+
+    // Batch 9: TableBr op — verify TableBr changes block_idx (happy path)
+    #[test]
+    fn test_debugger_execute_tablebr() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![U30TableDecl { id: 0, targets: vec![1] }],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![], // no results
+                blocks: vec![
+                    U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(0) }, // index=0 → target block 1
+                            U30Op::TableBr { table: 0, index: 0 },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                    U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 1, value: U30Value::U8(10) },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] }, // no results
+                    },
+                ],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        // Step through: Const → TableBr (jumps to block 1) → Ret
+        dbg.step().unwrap(); // Const
+        dbg.step().unwrap(); // TableBr — changes block_idx to 1
+        assert_eq!(dbg.state.block_idx, 1, "after TableBr should be at block 1");
+        dbg.step().unwrap(); // Const in block 1
+        dbg.step().unwrap(); // Ret
+        // After execution, we should be done
+        assert!(true, "TableBr executed and jumped to block 1");
+    }
+
+    // Batch 10: Assert op (assert passes)
+    #[test]
+    fn test_debugger_execute_assert_passes() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U8],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        U30Op::Assert { cond: 0, msg: 1 },  // msg is a register index (unused)
+                        U30Op::Const { dst: 1, value: U30Value::U8(42) },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let r = dbg.state.regs.get(&1);
+        assert!(matches!(r, Some(U30Value::U8(42))), "Assert passed: got {:?}", r);
+    }
+
+    // Batch 11: Nop op
+    #[test]
+    fn test_debugger_execute_nop() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Nop,
+                        U30Op::Const { dst: 0, value: U30Value::U64(777) },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![0] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let r = dbg.state.regs.get(&0);
+        assert!(matches!(r, Some(U30Value::U64(777))), "Nop then Const: got {:?}", r);
+    }
+
+    // Batch 12: MemSize (separate test to avoid register index complexity)
+    #[test]
+    fn test_debugger_execute_mem_ops() {
+        let module = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: vec![0; 16] }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        // MemSize: get size of region 0 (dst=1 register, region is immediate=0)
+                        U30Op::MemSize { dst: 1, region: 0 },
+                        // MemGrow: grow region 0 by 16 bytes
+                        // delta field is register index: need r2 = 16
+                        U30Op::Const { dst: 2, value: U30Value::U64(16) },
+                        U30Op::MemGrow { dst: 3, region: 0, delta: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+        let r1 = dbg.state.regs.get(&1);
+        let r3 = dbg.state.regs.get(&3);
+        assert!(matches!(r1, Some(U30Value::U64(16))), "MemSize region 0 = 16: got {:?}", r1);
+        assert!(matches!(r3, Some(U30Value::U64(16))), "MemGrow delta=16: got {:?}", r3);
+    }
+
+    // Batch 13: Break op
+    #[test]
+    #[should_panic(expected = "U30X break(99)")]
+    fn test_debugger_execute_break() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![], // no return values
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(99) },
+                        U30Op::Break { code: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+    }
+
+    // Error paths for uncovered execute_op arms
+    #[test]
+    #[should_panic(expected = "U30X type error")]
+    fn test_debugger_execute_i2f_wrong_type() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.5) },
+                        U30Op::I2F { dst: 1, src: 0 }, // I2F expects integer, got F64
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "U30X type error")]
+    fn test_debugger_execute_f2i_wrong_type() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                        U30Op::F2I { dst: 1, src: 0 }, // F2I expects float, got U64
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "U30X type error")]
+    fn test_debugger_execute_popcnt_wrong_type() {
+        let module = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.5) },
+                        U30Op::PopcntU64 { dst: 1, src: 0 }, // expects integer, got F64
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![1] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(module, &[], 1000).unwrap();
+        dbg.run_to_completion().unwrap();
+    }
 }
