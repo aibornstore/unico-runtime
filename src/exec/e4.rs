@@ -711,6 +711,20 @@ mod tests {
     }
 
     #[allow(dead_code)]
+    fn make_module_with_tables(code: Vec<Instruction>) -> E4Module {
+        E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 16,
+                code,
+            }],
+            memory: vec![0u8; 65536],
+            tables: vec![],
+        }
+    }
+
+    #[allow(dead_code)]
     /// Helper to test FP ops: loads two f32 values into regs via i2f
     /// We use FImm to set f32 values directly (stored as bits in i32)
     fn fbits(f: f32) -> i32 {
@@ -2227,6 +2241,805 @@ mod tests {
         assert!(result.is_err(), "invalid table index should error");
         let err = result.unwrap_err();
         assert!(err.to_string().contains("invalid table"), "got: {}", err);
+    }
+
+    // === Type mismatch error path tests ===
+    #[test]
+    fn test_e4_iadd_type_mismatch() {
+        // IAdd with F32 values should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::FImm { dst: 1, imm: 2.0 },
+            Instruction::IAdd { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_isub_type_mismatch() {
+        // ISub with F32 values should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 5.0 },
+            Instruction::FImm { dst: 1, imm: 3.0 },
+            Instruction::ISub { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_imul_type_mismatch() {
+        // IMul with F32 values should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 3.0 },
+            Instruction::FImm { dst: 1, imm: 4.0 },
+            Instruction::IMul { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_idiv_type_mismatch() {
+        // IDiv with F32 values should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 10.0 },
+            Instruction::FImm { dst: 1, imm: 2.0 },
+            Instruction::IDiv { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_iand_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::FImm { dst: 1, imm: 1.0 },
+            Instruction::IAnd { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_ior_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::FImm { dst: 1, imm: 2.0 },
+            Instruction::IOr { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_ixor_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::FImm { dst: 1, imm: 1.0 },
+            Instruction::IXor { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_inot_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 0.0 },
+            Instruction::INot { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_iclz_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::IClz { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_ictz_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::ICtz { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_ipopcnt_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 7.0 },
+            Instruction::IPopcnt { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_irotl_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::FImm { dst: 1, imm: 3.0 },
+            Instruction::IRotl { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_irotr_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 16.0 },
+            Instruction::FImm { dst: 1, imm: 2.0 },
+            Instruction::IRotr { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_fadd_type_mismatch() {
+        // FAdd with I32 values should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 }, // r1 = 1
+            Instruction::FAdd { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_fsub_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 },
+            Instruction::FSub { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_fmul_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 },
+            Instruction::FMul { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_fdiv_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 },
+            Instruction::FDiv { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_fsqrt_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::FSqrt { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_fneg_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::FNeg { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_fabs_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::FAbs { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_fround_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::FRound { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_fcmp_type_mismatch() {
+        // FCmp with I32 values should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 },
+            Instruction::FCmp { pred: 0, dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_cmp_type_mismatch() {
+        // Cmp with F32 values should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::FImm { dst: 1, imm: 2.0 },
+            Instruction::Cmp { pred: 0, dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_i2f_type_mismatch() {
+        // I2F with F32 value should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 42.0 },
+            Instruction::I2F { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_u2f_type_mismatch() {
+        // U2F with F32 value should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 42.0 },
+            Instruction::U2F { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_brif_type_mismatch() {
+        // BrIf with non-bool (F32) should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 },
+            Instruction::BrIf { cond: 0, target: 4 },
+            Instruction::Ret { dst: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f2i_type_mismatch() {
+        // F2I with I32 value should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::F2I { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f2u_type_mismatch() {
+        // F2U with I32 value should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::F2U { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    // === F64 type mismatch tests ===
+    #[test]
+    fn test_e4_f64add_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 },
+            Instruction::FAddF64 { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f64sub_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 },
+            Instruction::FSubF64 { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f64mul_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 },
+            Instruction::FMulF64 { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f64div_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 },
+            Instruction::FDivF64 { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f64sqrt_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::FSqrtF64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f64neg_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::FNegF64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f64abs_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::FAbsF64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f64round_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::FRoundF64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f64cmp_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 },
+            Instruction::FCmpF64 { pred: 0, dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_i2f64_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 42.0 },
+            Instruction::I2F64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_u2f64_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 42.0 },
+            Instruction::U2F64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f642i_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::F642I { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_f642u_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::F642U { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    // === E4Value as_f32 / as_f64 / as_bool error paths ===
+    #[test]
+    fn test_e4_value_as_f32_from_i32_fails() {
+        // E4Value::as_f32 with I32 should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1 (I32)
+            Instruction::FAdd { dst: 1, a: 0, b: 0 }, // FAdd expects F32, gets I32
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_value_as_f64_from_i32_fails() {
+        // E4Value::as_f64 with I32 should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 },
+            Instruction::Cmp { pred: 0, dst: 1, a: 0, b: 0 },
+            Instruction::FAddF64 { dst: 2, a: 0, b: 1 }, // FAddF64 expects F64, gets I32
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_value_as_bool_from_f32_fails() {
+        // E4Value::as_bool with F32 should fail
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 }, // r0 = F32
+            Instruction::BrIf { cond: 0, target: 4 }, // BrIf expects bool, gets F32
+            Instruction::Ret { dst: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_value_as_bool_from_f64_fails() {
+        // E4Value::as_bool with F64 should fail
+        let mut exec = E4Executor::default();
+        let module = make_module_with_tables(vec![
+            Instruction::FImmF64 { dst: 0, imm: 1.0 }, // r0 = F64
+            Instruction::BrIf { cond: 0, target: 4 },
+            Instruction::Ret { dst: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    // === Additional F64 roundtrip tests ===
+    #[test]
+    fn test_e4_f64_roundtrip_fsub() {
+        let mut exec = E4Executor::default();
+        let module = make_module_with_tables(vec![
+            Instruction::FImmF64 { dst: 0, imm: 10.0 },
+            Instruction::FImmF64 { dst: 1, imm: 3.5 },
+            Instruction::FSubF64 { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u64;
+        let f = f64::from_bits(bits);
+        assert!((f - 6.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_e4_f64_roundtrip_fmul() {
+        let mut exec = E4Executor::default();
+        let module = make_module_with_tables(vec![
+            Instruction::FImmF64 { dst: 0, imm: 2.5 },
+            Instruction::FImmF64 { dst: 1, imm: 4.0 },
+            Instruction::FMulF64 { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u64;
+        let f = f64::from_bits(bits);
+        assert!((f - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_e4_f64_roundtrip_fdiv() {
+        let mut exec = E4Executor::default();
+        let module = make_module_with_tables(vec![
+            Instruction::FImmF64 { dst: 0, imm: 20.0 },
+            Instruction::FImmF64 { dst: 1, imm: 4.0 },
+            Instruction::FDivF64 { dst: 2, a: 0, b: 1 },
+            Instruction::Ret { dst: 2 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u64;
+        let f = f64::from_bits(bits);
+        assert!((f - 5.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_e4_f64_roundtrip_fsqrt() {
+        let mut exec = E4Executor::default();
+        let module = make_module_with_tables(vec![
+            Instruction::FImmF64 { dst: 0, imm: 16.0 },
+            Instruction::FSqrtF64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u64;
+        let f = f64::from_bits(bits);
+        assert!((f - 4.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_e4_f64_roundtrip_fneg() {
+        let mut exec = E4Executor::default();
+        let module = make_module_with_tables(vec![
+            Instruction::FImmF64 { dst: 0, imm: 3.14 },
+            Instruction::FNegF64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u64;
+        let f = f64::from_bits(bits);
+        assert!((f - (-3.14)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_e4_f64_roundtrip_fabs() {
+        let mut exec = E4Executor::default();
+        let module = make_module_with_tables(vec![
+            Instruction::FImmF64 { dst: 0, imm: -7.5 },
+            Instruction::FAbsF64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u64;
+        let f = f64::from_bits(bits);
+        assert!((f - 7.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_e4_f64_roundtrip_fround() {
+        let mut exec = E4Executor::default();
+        let module = make_module_with_tables(vec![
+            Instruction::FImmF64 { dst: 0, imm: 3.7 },
+            Instruction::FRoundF64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u64;
+        let f = f64::from_bits(bits);
+        assert!((f - 4.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_e4_f64_i2f_roundtrip() {
+        let mut exec = E4Executor::default();
+        let module = make_module_with_tables(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+            Instruction::I2F64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u64;
+        let f = f64::from_bits(bits);
+        assert!((f - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_e4_f64_u2f_roundtrip() {
+        let mut exec = E4Executor::default();
+        let module = make_module_with_tables(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+            Instruction::U2F64 { dst: 1, a: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u64;
+        let f = f64::from_bits(bits);
+        assert!((f - 1.0).abs() < 1e-10);
+    }
+
+    // === I64 Load/Store type error paths ===
+    #[test]
+    fn test_e4_loadi64_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 }, // F32, not I32
+            Instruction::LoadI64 { dst: 1, addr: 0 },
+            Instruction::Ret { dst: 1 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_e4_storei64_type_mismatch() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 1.0 }, // F32, not I32
+            Instruction::FImm { dst: 1, imm: 2.0 }, // F32, not I32
+            Instruction::StoreI64 { addr: 0, src: 1 },
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0);
+        assert!(result.is_err());
+    }
+
+    // === pc >= code.len() coverage ===
+    #[test]
+    fn test_e4_pc_end_of_code() {
+        // pc at end of code (no instruction)
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![]); // empty code
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Fail);
+    }
+
+    // === E4Value I32/F32/F64 value roundtrip ===
+    #[test]
+    fn test_e4_value_ret_i32() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::Cmp { pred: 0, dst: 0, a: 0, b: 0 }, // r0 = 1
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value.unwrap(), 1);
+    }
+
+    #[test]
+    fn test_e4_value_ret_f32() {
+        let mut exec = E4Executor::default();
+        let module = make_module(vec![
+            Instruction::FImm { dst: 0, imm: 99.5 },
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u32;
+        let f = f32::from_bits(bits);
+        assert!((f - 99.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_e4_value_ret_f64() {
+        let mut exec = E4Executor::default();
+        let module = make_module_with_tables(vec![
+            Instruction::FImmF64 { dst: 0, imm: 77.25 },
+            Instruction::Ret { dst: 0 },
+        ]);
+        let result = exec.execute(&module, 0).unwrap();
+        assert_eq!(result.status, Status::Pass);
+        let bits = result.value.unwrap() as u64;
+        let f = f64::from_bits(bits);
+        assert!((f - 77.25).abs() < 0.001);
     }
 
     // === End error path tests ===
