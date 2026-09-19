@@ -1112,6 +1112,34 @@ mod tests {
     }
 
     #[test]
+    fn test_disasm_truncated_header_error_message() {
+        // Truncated header triggers "E4: truncated header" — covers RHS of error assertion
+        let truncated = vec![0xE4, 0x58, 0x58, 0x01]; // magic + version, no more data
+        let result = decode_disasm(&truncated);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        // "E4: truncated" message hits the RHS branch (no "bad magic")
+        assert!(err_msg.contains("E4"));
+    }
+
+    #[test]
+    fn test_fmt_module_default() {
+        // Covers the public fmt_module() convenience function
+        let module = E4Module {
+            functions: vec![E4FunctionDef {
+                param_count: 0,
+                result_count: 1,
+                register_count: 2,
+                code: vec![Instruction::Ret { dst: 0 }],
+            }],
+            memory: vec![1, 2, 3],
+            tables: vec![],
+        };
+        let text = fmt_module(&module);
+        assert!(text.contains("E4 Module"));
+    }
+
+    #[test]
     fn test_disasm_truncated_header() {
         // Truncated header should fail
         let truncated = vec![0xE4, 0x58, 0x58]; // only 3 bytes
