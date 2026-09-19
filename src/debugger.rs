@@ -1,4 +1,4 @@
-﻿//! U30 Debugger — step-by-step execution with breakpoints and inspection.
+//! U30 Debugger — step-by-step execution with breakpoints and inspection.
 //!
 //! ## Example
 //! ```rust,no_run
@@ -11594,5 +11594,307 @@ mod tests {
         let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
         let r = dbg.run_to_completion();
         assert!(r.is_err());
+    }
+
+    // === T90: Type mismatch in U32 binary ops (eval_binary error path) ===
+    #[test]
+    fn test_debugger_binary_u32_type_mismatch() {
+        // AddWrapU32 expects U32 inputs — passing F64 triggers as_u32() error
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(1) },
+                        U30Op::Const { dst: 1, value: U30Value::F64(2.0) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::AddWrapU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err(), "AddWrapU32 with F64 operand should error");
+    }
+
+    // === T91: Type mismatch in F64 comparison ops ===
+    #[test]
+    fn test_debugger_f64_cmp_type_mismatch() {
+        // F64Lt expects F64 inputs — passing U64 triggers as_f64() error
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(1) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(2) },
+                        U30Op::F64Lt { dst: 2, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err(), "F64Lt with U64 operands should error");
+    }
+
+    // === T92: DivU32 by zero (runtime error path) ===
+    #[test]
+    fn test_debugger_binary_div_u32_by_zero() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(42) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::DivU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err(), "DivU32 by zero should error");
+    }
+
+    // === T93: RemU32 by zero (runtime error path) ===
+    #[test]
+    fn test_debugger_binary_rem_u32_by_zero() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(42) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0) },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::RemU32, a: 0, b: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        let r = dbg.run_to_completion();
+        assert!(r.is_err(), "RemU32 by zero should error");
+    }
+
+    // === T94: Load with undefined offset register (verification catches it) ===
+    #[test]
+    fn test_debugger_load_undefined_offset() {
+        // LoadU8 offset from register 99 — verifier catches undefined offset
+        let m = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: vec![0; 16] }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U8(42) },
+                        U30Op::LoadU8 { dst: 1, region: 0, offset: 99 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // Verifier catches undefined offset register at construction time
+        let r = U30Debugger::new(m, &[], 1000);
+        assert!(r.is_err(), "LoadU8 with undefined offset should fail verification");
+    }
+
+    // === T95: Store with undefined val register (verification catches it) ===
+    #[test]
+    fn test_debugger_store_undefined_val() {
+        // StoreU8 src register 99 is undefined — verifier catches it
+        let m = U30Module {
+            regions: vec![U30RegionDecl { id: 0, size: 16, readable: true, writable: true, initial: vec![0; 16] }],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U8(1) },
+                        U30Op::StoreU8 { region: 0, offset: 0, src: 99 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = U30Debugger::new(m, &[], 1000);
+        assert!(r.is_err(), "StoreU8 with undefined val register should fail verification");
+    }
+
+    // === T96: TableBr with invalid table ID (verification catches it) ===
+    #[test]
+    fn test_debugger_tablebr_invalid_table_id() {
+        // TableBr with table: 99 (doesn't exist) — verifier catches it
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![crate::ir::U30TableDecl { id: 0, targets: vec![0, 1] }],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![
+                    U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                            U30Op::TableBr { table: 99, index: 0 }, // table 99 doesn't exist
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = U30Debugger::new(m, &[], 1000);
+        assert!(r.is_err(), "TableBr with invalid table ID should fail verification");
+    }
+
+    // === T97: IndirectCall with undefined function register (verification catches it) ===
+    #[test]
+    fn test_debugger_indirectcall_undefined_fn_reg() {
+        // IndirectCall function register 99 is undefined — verifier catches it
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                            U30Op::IndirectCall { function: 99, args: vec![], results: vec![] }, // undefined
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 1,
+        };
+        let r = U30Debugger::new(m, &[], 1000);
+        assert!(r.is_err(), "IndirectCall with undefined function register should fail verification");
+    }
+
+    // === T98: TailCall with undefined function register (RUNTIME error path) ===
+    #[test]
+    fn test_debugger_tailcall_undefined_fn_reg() {
+        // TailCall function register 99 is undefined — verifier does NOT catch this,
+        // so it fails at runtime when process_terminator calls reg(function)
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                    ],
+                    terminator: U30Terminator::TailCall { function: 99, args: vec![] }, // undefined — runtime error
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // Construction succeeds (verifier misses undefined TailCall function register)
+        let mut dbg = U30Debugger::new(m, &[], 1000).unwrap();
+        // Runtime fails when trying to read register 99
+        let r = dbg.run_to_completion();
+        assert!(r.is_err(), "TailCall with undefined function register should error at runtime");
+    }
+
+    // === T99: F64 comparison ops undefined register (verification catches it) ===
+    #[test]
+    fn test_debugger_f64_cmp_undefined_reg() {
+        // F64Lt b register 99 is undefined — verifier catches it
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::Bool],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F64(1.0) },
+                        U30Op::F64Lt { dst: 2, a: 0, b: 99 }, // b=99 is undefined
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = U30Debugger::new(m, &[], 1000);
+        assert!(r.is_err(), "F64Lt with undefined b register should fail verification");
+    }
+
+    // === T100: F32 ops undefined register (verification catches it) ===
+    #[test]
+    fn test_debugger_f32_undefined_reg() {
+        // FAdd b register 99 is undefined — verifier catches it
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::F32],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::F32(1.0) },
+                        U30Op::FAdd { dst: 2, a: 0, b: 99 }, // b=99 is undefined
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = U30Debugger::new(m, &[], 1000);
+        assert!(r.is_err(), "FAdd with undefined b register should fail verification");
     }
 }
