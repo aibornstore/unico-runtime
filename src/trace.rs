@@ -31,11 +31,7 @@ impl SemanticTrace {
 
     /// Append one semantic operation. Sequence numbers are assigned here so
     /// callers cannot create gaps, duplicates, or non-zero starting indices.
-    pub fn push(
-        &mut self,
-        operation: impl Into<String>,
-        effects: Vec<TraceEffect>,
-    ) -> u64 {
+    pub fn push(&mut self, operation: impl Into<String>, effects: Vec<TraceEffect>) -> u64 {
         let seq = self.events.len() as u64;
         self.events.push(TraceEvent {
             seq,
@@ -96,11 +92,7 @@ pub struct TraceEffect {
 }
 
 impl TraceEffect {
-    pub fn new(
-        kind: impl Into<String>,
-        target: impl Into<String>,
-        value: TraceValue,
-    ) -> Self {
+    pub fn new(kind: impl Into<String>, target: impl Into<String>, value: TraceValue) -> Self {
         Self {
             kind: kind.into(),
             target: target.into(),
@@ -228,18 +220,9 @@ mod tests {
         assert_eq!(TraceValue::U8(0xab).canonical_text(), "u8:ab");
         assert_eq!(TraceValue::U16(1).canonical_text(), "u16:0001");
         assert_eq!(TraceValue::U32(1).canonical_text(), "u32:00000001");
-        assert_eq!(
-            TraceValue::U64(1).canonical_text(),
-            "u64:0000000000000001"
-        );
-        assert_eq!(
-            TraceValue::I64(-1).canonical_text(),
-            "i64:ffffffffffffffff"
-        );
-        assert_eq!(
-            TraceValue::f32(-0.0).canonical_text(),
-            "f32:80000000"
-        );
+        assert_eq!(TraceValue::U64(1).canonical_text(), "u64:0000000000000001");
+        assert_eq!(TraceValue::I64(-1).canonical_text(), "i64:ffffffffffffffff");
+        assert_eq!(TraceValue::f32(-0.0).canonical_text(), "f32:80000000");
         assert_eq!(
             TraceValue::f64(-0.0).canonical_text(),
             "f64:8000000000000000"
