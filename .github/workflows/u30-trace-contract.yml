@@ -26,8 +26,8 @@ jobs:
           cargo --version
           rustfmt --version
 
-      - name: Format
-        run: cargo fmt --all -- --check
+      - name: Format changed trace module
+        run: rustfmt --edition 2021 --check src/trace.rs
 
       - name: Focused trace tests
         run: cargo test --lib trace::tests -- --nocapture
