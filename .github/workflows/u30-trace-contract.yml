@@ -1,0 +1,36 @@
+name: U30 trace contract candidate
+
+on:
+  pull_request:
+    paths:
+      - "src/trace.rs"
+      - "src/lib.rs"
+      - ".github/workflows/u30-trace-contract.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          rustc --version
+          cargo --version
+          rustfmt --version
+
+      - name: Format changed trace module
+        run: rustfmt --edition 2021 --check src/trace.rs
+
+      - name: Focused trace tests
+        run: cargo test --lib trace::tests -- --nocapture
+
+      - name: Full library regression
+        run: cargo test --lib

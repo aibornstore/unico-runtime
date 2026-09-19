@@ -16,6 +16,7 @@ pub mod leb128;
 pub mod pretty;
 pub mod runtime;
 pub mod ser;
+pub mod trace;
 pub mod types;
 pub mod verify;
 
@@ -27,4 +28,5 @@ pub use pretty::{fmt_module, fmt_module_opts, FmtOpts};
 pub use ser::{decode, encode};
 pub use debugger::{Breakpoint, U30DebugEvent, U30DebugState, U30Debugger};
 pub use ir::U30Module;
+pub use trace::{SemanticTrace, TraceEffect, TraceEvent, TraceValue, TRACE_SCHEMA};
 pub use types::{I64, Profile, Provenance, Status};
