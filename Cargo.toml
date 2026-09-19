@@ -9,3 +9,25 @@ description = "UNICO v3.0 Execution Runtime"
 thiserror = "1.0"
 hex = "0.4"
 rand = "0.8"
+clap = { version = "4.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+byteorder = "1.4"
+ring = { version = "0.17", optional = true }
+
+[dev-dependencies]
+criterion = "0.4"
+
+[features]
+default = []
+ring = ["dep:ring"]
+
+[[bin]]
+name = "unico"
+path = "src/cli/unico.rs"
+test = false
+
+[[bench]]
+name = "benchmark"
+harness = false

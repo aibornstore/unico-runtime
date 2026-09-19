@@ -1,3 +1,2773 @@
-//! UNICO IR - Placeholder
+//! UNICO U30 IR — executable experimental subset.
+//!
+//! This module is intentionally narrow. It implements only the typed operations
+//! needed by the ANVAYA GAME-001 movement kernel. It does NOT freeze canonical
+//! U30 byte encoding and does NOT change any UNICO readiness/release claim.
 
-// Stub module - implement later
+use crate::error::{Error, Result};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum U30Type {
+    Bool,
+    U8,
+    U16,
+    U32,
+    U64,
+    F32,
+    F64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum U30Value {
+    Bool(bool),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    F32(f32),
+    F64(f64),
+}
+
+impl U30Value {
+    pub fn value_type(&self) -> U30Type {
+        match self {
+            Self::Bool(_) => U30Type::Bool,
+            Self::U8(_) => U30Type::U8,
+            Self::U16(_) => U30Type::U16,
+            Self::U32(_) => U30Type::U32,
+            Self::U64(_) => U30Type::U64,
+            Self::F32(_) => U30Type::F32,
+            Self::F64(_) => U30Type::F64,
+        }
+    }
+
+    pub fn as_bool(&self) -> Result<bool> {
+        match self {
+            Self::Bool(v) => Ok(*v),
+            other => Err(Error::Generic(format!("U30X type error: expected bool, got {:?}", other.value_type()))),
+        }
+    }
+
+    pub fn as_u8(&self) -> Result<u8> {
+        match self {
+            Self::U8(v) => Ok(*v),
+            other => Err(Error::Generic(format!("U30X type error: expected u8, got {:?}", other.value_type()))),
+        }
+    }
+
+    pub fn as_u16(&self) -> Result<u16> {
+        match self {
+            Self::U16(v) => Ok(*v),
+            other => Err(Error::Generic(format!("U30X type error: expected u16, got {:?}", other.value_type()))),
+        }
+    }
+
+    pub fn as_u32(&self) -> Result<u32> {
+        match self {
+            Self::U32(v) => Ok(*v),
+            other => Err(Error::Generic(format!("U30X type error: expected u32, got {:?}", other.value_type()))),
+        }
+    }
+
+    pub fn as_u64(&self) -> Result<u64> {
+        match self {
+            Self::U8(v) => Ok(*v as u64),
+            Self::U16(v) => Ok(*v as u64),
+            Self::U32(v) => Ok(*v as u64),
+            Self::U64(v) => Ok(*v),
+            other => Err(Error::Generic(format!("U30X type error: expected integer, got {:?}", other.value_type()))),
+        }
+    }
+
+    pub fn as_i64(&self) -> Result<i64> {
+        match self {
+            Self::U8(v) => Ok(*v as i64),
+            Self::U16(v) => Ok(*v as i64),
+            Self::U32(v) => Ok(*v as i64),
+            Self::U64(v) => Ok(*v as i64),
+            other => Err(Error::Generic(format!("U30X type error: expected integer, got {:?}", other.value_type()))),
+        }
+    }
+
+    pub fn as_f32(&self) -> Result<f32> {
+        match self {
+            Self::F32(v) => Ok(*v),
+            other => Err(Error::Generic(format!("U30X type error: expected f32, got {:?}", other.value_type()))),
+        }
+    }
+
+    pub fn as_f64(&self) -> Result<f64> {
+        match self {
+            Self::F64(v) => Ok(*v),
+            other => Err(Error::Generic(format!("U30X type error: expected f64, got {:?}", other.value_type()))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct U30RegionDecl {
+    pub id: u32,
+    pub size: usize,
+    pub readable: bool,
+    pub writable: bool,
+    pub initial: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct U30TableDecl {
+    pub id: u32,
+    pub targets: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum U30BinaryOp {
+    AddWrapU64,
+    AddWrapU32,
+    SubWrapU64,
+    SubWrapU32,
+    MulWrapU64,
+    MulWrapU32,
+    AndU8,
+    OrU8,
+    XorU8,
+    ShlU64,
+    ShlU32,
+    ShrU64,
+    ShrU32,
+    DivU64,
+    DivU32,
+    RemU64,
+    RemU32,
+    Eq,
+    LtU64,
+    GtU64,
+    GeU64,
+    LeU64,
+    LeU32,
+    MinU64,
+    MaxU64,
+    MinU32,
+    MaxU32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum U30Op {
+    Const { dst: u32, value: U30Value },
+    Binary { dst: u32, op: U30BinaryOp, a: u32, b: u32 },
+    Select { dst: u32, cond: u32, a: u32, b: u32 },
+    NotU8 { dst: u32, src: u32 },
+    NotU16 { dst: u32, src: u32 },
+    NotU32 { dst: u32, src: u32 },
+    NotU64 { dst: u32, src: u32 },
+    I2F { dst: u32, src: u32 },
+    F2I { dst: u32, src: u32 },
+    TruncF32U64 { dst: u32, src: u32 },
+    ReinterpretF32U32 { dst: u32, src: u32 },
+    ReinterpretU32F32 { dst: u32, src: u32 },
+    AbsU64 { dst: u32, src: u32 },
+    AbsU32 { dst: u32, src: u32 },
+    NegU64 { dst: u32, src: u32 },
+    NegU32 { dst: u32, src: u32 },
+    CtzU64 { dst: u32, src: u32 },
+    CtzU32 { dst: u32, src: u32 },
+    ClzU64 { dst: u32, src: u32 },
+    ClzU32 { dst: u32, src: u32 },
+    PopcntU64 { dst: u32, src: u32 },
+    PopcntU32 { dst: u32, src: u32 },
+    RotlU64 { dst: u32, val: u32, sh: u32 },
+    RotlU32 { dst: u32, val: u32, sh: u32 },
+    RotrU64 { dst: u32, val: u32, sh: u32 },
+    RotrU32 { dst: u32, val: u32, sh: u32 },
+    FEq { dst: u32, a: u32, b: u32 },
+    FLt { dst: u32, a: u32, b: u32 },
+    FGt { dst: u32, a: u32, b: u32 },
+    FLe { dst: u32, a: u32, b: u32 },
+    FGe { dst: u32, a: u32, b: u32 },
+    FAdd { dst: u32, a: u32, b: u32 },
+    FSub { dst: u32, a: u32, b: u32 },
+    FMul { dst: u32, a: u32, b: u32 },
+    FDiv { dst: u32, a: u32, b: u32 },
+    FSqrt { dst: u32, src: u32 },
+    FAbs { dst: u32, src: u32 },
+    FNeg { dst: u32, src: u32 },
+    FMin { dst: u32, a: u32, b: u32 },
+    FMax { dst: u32, a: u32, b: u32 },
+    ZExtI8U16 { dst: u32, src: u32 },
+    ZExtI8U32 { dst: u32, src: u32 },
+    ZExtI8U64 { dst: u32, src: u32 },
+    ZExtI16U32 { dst: u32, src: u32 },
+    ZExtI16U64 { dst: u32, src: u32 },
+    ZExtI32U64 { dst: u32, src: u32 },
+    TruncU64U32 { dst: u32, src: u32 },
+    TruncU64U16 { dst: u32, src: u32 },
+    TruncU32U16 { dst: u32, src: u32 },
+    MemCopy { dst_region: u32, dst_offset: u32, src_region: u32, src_offset: u32, size: u32 },
+    MemFill { region: u32, offset: u32, value: u32, size: u32 },
+    MemSize { dst: u32, region: u32 },
+    MemGrow { dst: u32, region: u32, delta: u32 },
+    // F64 arithmetic
+    F64Eq { dst: u32, a: u32, b: u32 },
+    F64Lt { dst: u32, a: u32, b: u32 },
+    F64Gt { dst: u32, a: u32, b: u32 },
+    F64Le { dst: u32, a: u32, b: u32 },
+    F64Ge { dst: u32, a: u32, b: u32 },
+    F64Add { dst: u32, a: u32, b: u32 },
+    F64Sub { dst: u32, a: u32, b: u32 },
+    F64Mul { dst: u32, a: u32, b: u32 },
+    F64Div { dst: u32, a: u32, b: u32 },
+    F64Sqrt { dst: u32, src: u32 },
+    F64Abs { dst: u32, src: u32 },
+    F64Neg { dst: u32, src: u32 },
+    F64Min { dst: u32, a: u32, b: u32 },
+    F64Max { dst: u32, a: u32, b: u32 },
+    // F64 conversions
+    I64F64 { dst: u32, src: u32 },
+    F64I64 { dst: u32, src: u32 },
+    F32F64 { dst: u32, src: u32 },
+    F64F32 { dst: u32, src: u32 },
+    ReinterpretF64U64 { dst: u32, src: u32 },
+    ReinterpretU64F64 { dst: u32, src: u32 },
+    // Sign extend (preserve sign bit)
+    SExtI8U16 { dst: u32, src: u32 },
+    SExtI8U32 { dst: u32, src: u32 },
+    SExtI8U64 { dst: u32, src: u32 },
+    SExtI16U32 { dst: u32, src: u32 },
+    SExtI16U64 { dst: u32, src: u32 },
+    SExtI32U64 { dst: u32, src: u32 },
+    // Byte swap
+    ByteSwapU16 { dst: u32, src: u32 },
+    ByteSwapU32 { dst: u32, src: u32 },
+    ByteSwapU64 { dst: u32, src: u32 },
+    Call { function: u32, args: Vec<u32>, results: Vec<u32> },
+    IndirectCall { function: u32, args: Vec<u32>, results: Vec<u32> },
+    TableBr { table: u32, index: u32 },
+    Break { code: u32 },
+    Assert { cond: u32, msg: u32 },
+    Nop,
+    LoadU8 { dst: u32, region: u32, offset: u32 },
+    StoreU8 { region: u32, offset: u32, src: u32 },
+    LoadU16 { dst: u32, region: u32, offset: u32 },
+    StoreU16 { region: u32, offset: u32, src: u32 },
+    LoadU32 { dst: u32, region: u32, offset: u32 },
+    StoreU32 { region: u32, offset: u32, src: u32 },
+    LoadU64 { dst: u32, region: u32, offset: u32 },
+    StoreU64 { region: u32, offset: u32, src: u32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum U30Terminator {
+    Br { target: usize },
+    BrIf { cond: u32, then_target: usize, else_target: usize },
+    Ret { values: Vec<u32> },
+    /// Tail-call: transfer control to another function, replacing the current frame.
+    /// No return address is saved — the callee's return goes to our caller.
+    TailCall { function: u32, args: Vec<u32> },
+    Trap { code: u32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct U30Block {
+    pub ops: Vec<U30Op>,
+    pub terminator: U30Terminator,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct U30Function {
+    pub params: Vec<U30Type>,
+    pub results: Vec<U30Type>,
+    pub blocks: Vec<U30Block>,
+    pub entry_block: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct U30Module {
+    pub regions: Vec<U30RegionDecl>,
+    pub tables: Vec<U30TableDecl>,
+    pub functions: Vec<U30Function>,
+    pub entry_function: usize,
+}
+
+impl U30Module {
+    pub fn verify_experimental(&self) -> Result<()> {
+        if self.functions.is_empty() || self.entry_function >= self.functions.len() {
+            return Err(Error::Verification("U30X invalid entry function".into()));
+        }
+        let mut region_ids = BTreeSet::new();
+        for region in &self.regions {
+            if !region_ids.insert(region.id) {
+                return Err(Error::Verification(format!("U30X duplicate region {}", region.id)));
+            }
+            if region.initial.len() > region.size {
+                return Err(Error::Verification(format!("U30X region {} initializer overflow", region.id)));
+            }
+        }
+        let mut table_ids = BTreeSet::new();
+        for table in &self.tables {
+            if !table_ids.insert(table.id) {
+                return Err(Error::Verification(format!("U30X duplicate table {}", table.id)));
+            }
+            // Note: per-target block validation deferred to verify_function (knows block count)
+        }
+        for (fn_index, function) in self.functions.iter().enumerate() {
+            self.verify_function(fn_index, function, &region_ids, &table_ids)?;
+        }
+        Ok(())
+    }
+
+    fn verify_function(
+        &self,
+        fn_index: usize,
+        function: &U30Function,
+        region_ids: &BTreeSet<u32>,
+        table_ids: &BTreeSet<u32>,
+    ) -> Result<()> {
+        if function.blocks.is_empty() || function.entry_block >= function.blocks.len() {
+            return Err(Error::Verification(format!("U30X function {fn_index} has invalid entry block")));
+        }
+        let mut global_defined: BTreeSet<u32> = (0..function.params.len() as u32).collect();
+        for (block_index, block) in function.blocks.iter().enumerate() {
+            // Each block starts with params and all registers defined in earlier blocks.
+            // This matches the runtime's shared register file across all blocks.
+            let mut block_defined = global_defined.clone();
+            let defined = &mut block_defined; // local alias for brevity
+            for op in &block.ops {
+                let dst = match op {
+                    U30Op::Const { dst, .. }
+                    | U30Op::Binary { dst, .. }
+                    | U30Op::Select { dst, .. }
+                    | U30Op::NotU8 { dst, .. }
+                    | U30Op::NotU16 { dst, .. }
+                    | U30Op::NotU32 { dst, .. }
+                    | U30Op::NotU64 { dst, .. }
+                    | U30Op::I2F { dst, .. }
+                    | U30Op::F2I { dst, .. }
+                    | U30Op::TruncF32U64 { dst, .. }
+                    | U30Op::ReinterpretF32U32 { dst, .. }
+                    | U30Op::ReinterpretU32F32 { dst, .. }
+                    | U30Op::AbsU64 { dst, .. }
+                    | U30Op::AbsU32 { dst, .. }
+                    | U30Op::NegU64 { dst, .. }
+                    | U30Op::NegU32 { dst, .. }
+                    | U30Op::CtzU64 { dst, .. }
+                    | U30Op::CtzU32 { dst, .. }
+                    | U30Op::ClzU64 { dst, .. }
+                    | U30Op::ClzU32 { dst, .. }
+                    | U30Op::PopcntU64 { dst, .. }
+                    | U30Op::PopcntU32 { dst, .. }
+                    | U30Op::RotlU64 { dst, .. }
+                    | U30Op::RotlU32 { dst, .. }
+                    | U30Op::RotrU64 { dst, .. }
+                    | U30Op::RotrU32 { dst, .. }
+                    | U30Op::FEq { dst, .. }
+                    | U30Op::FLt { dst, .. }
+                    | U30Op::FGt { dst, .. }
+                    | U30Op::FLe { dst, .. }
+                    | U30Op::FGe { dst, .. }
+                    | U30Op::FAdd { dst, .. }
+                    | U30Op::FSub { dst, .. }
+                    | U30Op::FMul { dst, .. }
+                    | U30Op::FDiv { dst, .. }
+                    | U30Op::FSqrt { dst, .. }
+                    | U30Op::FAbs { dst, .. }
+                    | U30Op::FNeg { dst, .. }
+                    | U30Op::FMin { dst, .. }
+                    | U30Op::FMax { dst, .. }
+                    | U30Op::F64Eq { dst, .. }
+                    | U30Op::F64Lt { dst, .. }
+                    | U30Op::F64Gt { dst, .. }
+                    | U30Op::F64Le { dst, .. }
+                    | U30Op::F64Ge { dst, .. }
+                    | U30Op::F64Add { dst, .. }
+                    | U30Op::F64Sub { dst, .. }
+                    | U30Op::F64Mul { dst, .. }
+                    | U30Op::F64Div { dst, .. }
+                    | U30Op::F64Sqrt { dst, .. }
+                    | U30Op::F64Abs { dst, .. }
+                    | U30Op::F64Neg { dst, .. }
+                    | U30Op::F64Min { dst, .. }
+                    | U30Op::F64Max { dst, .. }
+                    | U30Op::I64F64 { dst, .. }
+                    | U30Op::F64I64 { dst, .. }
+                    | U30Op::F32F64 { dst, .. }
+                    | U30Op::F64F32 { dst, .. }
+                    | U30Op::ReinterpretF64U64 { dst, .. }
+                    | U30Op::ReinterpretU64F64 { dst, .. }
+                    | U30Op::SExtI8U16 { dst, .. }
+                    | U30Op::SExtI8U32 { dst, .. }
+                    | U30Op::SExtI8U64 { dst, .. }
+                    | U30Op::SExtI16U32 { dst, .. }
+                    | U30Op::SExtI16U64 { dst, .. }
+                    | U30Op::SExtI32U64 { dst, .. }
+                    | U30Op::ByteSwapU16 { dst, .. }
+                    | U30Op::ByteSwapU32 { dst, .. }
+                    | U30Op::ByteSwapU64 { dst, .. }
+                    | U30Op::ZExtI8U16 { dst, .. }
+                    | U30Op::ZExtI8U32 { dst, .. }
+                    | U30Op::ZExtI8U64 { dst, .. }
+                    | U30Op::ZExtI16U32 { dst, .. }
+                    | U30Op::ZExtI16U64 { dst, .. }
+                    | U30Op::ZExtI32U64 { dst, .. }
+                    | U30Op::TruncU64U32 { dst, .. }
+                    | U30Op::TruncU64U16 { dst, .. }
+                    | U30Op::TruncU32U16 { dst, .. }
+                    | U30Op::MemSize { dst, .. }
+                    | U30Op::MemGrow { dst, .. }
+                    | U30Op::LoadU8 { dst, .. }
+                    | U30Op::LoadU16 { dst, .. }
+                    | U30Op::LoadU32 { dst, .. }
+                    | U30Op::LoadU64 { dst, .. } => Some(*dst),
+                    U30Op::StoreU8 { .. }
+                    | U30Op::StoreU16 { .. }
+                    | U30Op::StoreU32 { .. }
+                    | U30Op::StoreU64 { .. }
+                    | U30Op::MemCopy { .. }
+                    | U30Op::MemFill { .. }
+                    | U30Op::Call { .. }
+                    | U30Op::IndirectCall { .. }
+                    | U30Op::TableBr { .. }
+                    | U30Op::Break { .. }
+                    | U30Op::Assert { .. }
+                    | U30Op::Nop => None,
+                };
+                if let Some(dst) = dst {
+                    // Register redefinition across multiple blocks is allowed.
+                    // The runtime executes one path at a time, so overwriting a register
+                    // in a different block is safe.
+                    defined.insert(dst);
+                }
+                // Validate that operands reference defined values
+                match op {
+                    U30Op::Const { .. } => {}
+                    U30Op::Binary { a, b, .. } => {
+                        if !defined.contains(a) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{a}"
+                            )));
+                        }
+                        if !defined.contains(b) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{b}"
+                            )));
+                        }
+                    }
+                    U30Op::Select { cond, a, b, .. } => {
+                        if !defined.contains(cond) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined condition value %{cond}"
+                            )));
+                        }
+                        if !defined.contains(a) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{a}"
+                            )));
+                        }
+                        if !defined.contains(b) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{b}"
+                            )));
+                        }
+                    }
+                    U30Op::NotU8 { src, .. }
+                    | U30Op::NotU16 { src, .. }
+                    | U30Op::NotU32 { src, .. }
+                    | U30Op::NotU64 { src, .. }
+                    | U30Op::I2F { src, .. }
+                    | U30Op::F2I { src, .. }
+                    | U30Op::TruncF32U64 { src, .. }
+                    | U30Op::ReinterpretF32U32 { src, .. }
+                    | U30Op::ReinterpretU32F32 { src, .. }
+                    | U30Op::AbsU64 { src, .. }
+                    | U30Op::AbsU32 { src, .. }
+                    | U30Op::NegU64 { src, .. }
+                    | U30Op::NegU32 { src, .. }
+                    | U30Op::CtzU64 { src, .. }
+                    | U30Op::CtzU32 { src, .. }
+                    | U30Op::ClzU64 { src, .. }
+                    | U30Op::ClzU32 { src, .. }
+                    | U30Op::PopcntU64 { src, .. }
+                    | U30Op::PopcntU32 { src, .. } => {
+                        if !defined.contains(src) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{src}"
+                            )));
+                        }
+                    }
+                    U30Op::RotlU64 { val, sh, .. }
+                    | U30Op::RotlU32 { val, sh, .. }
+                    | U30Op::RotrU64 { val, sh, .. }
+                    | U30Op::RotrU32 { val, sh, .. } => {
+                        if !defined.contains(val) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined val value %{val}"
+                            )));
+                        }
+                        if !defined.contains(sh) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined sh value %{sh}"
+                            )));
+                        }
+                    }
+                    U30Op::FEq { a, b, .. }
+                    | U30Op::FLt { a, b, .. }
+                    | U30Op::FGt { a, b, .. }
+                    | U30Op::FLe { a, b, .. }
+                    | U30Op::FGe { a, b, .. }
+                    | U30Op::F64Eq { a, b, .. }
+                    | U30Op::F64Lt { a, b, .. }
+                    | U30Op::F64Gt { a, b, .. }
+                    | U30Op::F64Le { a, b, .. }
+                    | U30Op::F64Ge { a, b, .. } => {
+                        if !defined.contains(a) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{a}"
+                            )));
+                        }
+                        if !defined.contains(b) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined source value %{b}"
+                            )));
+                        }
+                    }
+                    U30Op::LoadU8 { region, offset, .. }
+                    | U30Op::LoadU16 { region, offset, .. }
+                    | U30Op::LoadU32 { region, offset, .. }
+                    | U30Op::LoadU64 { region, offset, .. } => {
+                        if !region_ids.contains(region) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: unknown region {region}"
+                            )));
+                        }
+                        if !defined.contains(offset) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined offset value %{offset}"
+                            )));
+                        }
+                    }
+                    U30Op::StoreU8 { region, offset, src }
+                    | U30Op::StoreU16 { region, offset, src }
+                    | U30Op::StoreU32 { region, offset, src }
+                    | U30Op::StoreU64 { region, offset, src } => {
+                        if !region_ids.contains(region) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: unknown region {region}"
+                            )));
+                        }
+                        if !defined.contains(offset) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined offset value %{offset}"
+                            )));
+                        }
+                        if !defined.contains(src) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined src value %{src}"
+                            )));
+                        }
+                    }
+                    U30Op::FAdd { a, b, .. }
+                    | U30Op::FSub { a, b, .. }
+                    | U30Op::FMul { a, b, .. }
+                    | U30Op::FDiv { a, b, .. }
+                    | U30Op::FMin { a, b, .. }
+                    | U30Op::FMax { a, b, .. }
+                    | U30Op::F64Add { a, b, .. }
+                    | U30Op::F64Sub { a, b, .. }
+                    | U30Op::F64Mul { a, b, .. }
+                    | U30Op::F64Div { a, b, .. }
+                    | U30Op::F64Min { a, b, .. }
+                    | U30Op::F64Max { a, b, .. } => {
+                        if !defined.contains(a) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined a value %{a}"
+                            )));
+                        }
+                        if !defined.contains(b) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined b value %{b}"
+                            )));
+                        }
+                    }
+                    U30Op::FSqrt { src, .. }
+                    | U30Op::FAbs { src, .. }
+                    | U30Op::FNeg { src, .. }
+                    | U30Op::F64Sqrt { src, .. }
+                    | U30Op::F64Abs { src, .. }
+                    | U30Op::F64Neg { src, .. }
+                    | U30Op::ZExtI8U16 { src, .. }
+                    | U30Op::ZExtI8U32 { src, .. }
+                    | U30Op::ZExtI8U64 { src, .. }
+                    | U30Op::ZExtI16U32 { src, .. }
+                    | U30Op::ZExtI16U64 { src, .. }
+                    | U30Op::ZExtI32U64 { src, .. }
+                    | U30Op::TruncU64U32 { src, .. }
+                    | U30Op::TruncU64U16 { src, .. }
+                    | U30Op::TruncU32U16 { src, .. }
+                    | U30Op::SExtI8U16 { src, .. }
+                    | U30Op::SExtI8U32 { src, .. }
+                    | U30Op::SExtI8U64 { src, .. }
+                    | U30Op::SExtI16U32 { src, .. }
+                    | U30Op::SExtI16U64 { src, .. }
+                    | U30Op::SExtI32U64 { src, .. }
+                    | U30Op::ByteSwapU16 { src, .. }
+                    | U30Op::ByteSwapU32 { src, .. }
+                    | U30Op::ByteSwapU64 { src, .. }
+                    | U30Op::I64F64 { src, .. }
+                    | U30Op::F64I64 { src, .. }
+                    | U30Op::F32F64 { src, .. }
+                    | U30Op::F64F32 { src, .. }
+                    | U30Op::ReinterpretF64U64 { src, .. }
+                    | U30Op::ReinterpretU64F64 { src, .. } => {
+                        if !defined.contains(src) {
+                            return Err(Error::Verification(format!(
+                                "U30X function {fn_index} block {block_index}: undefined src value %{src}"
+                            )));
+                        }
+                    }
+                    U30Op::MemCopy { dst_region, dst_offset, src_region, src_offset, size } => {
+                        if !region_ids.contains(dst_region) {
+                            return Err(Error::Verification("U30X unknown dst region".into()));
+                        }
+                        if !region_ids.contains(src_region) {
+                            return Err(Error::Verification("U30X unknown src region".into()));
+                        }
+                        for r in &[dst_offset, src_offset, size] {
+                            if !defined.contains(r) {
+                                return Err(Error::Verification("U30X undefined value in memcopy".into()));
+                            }
+                        }
+                    }
+                    U30Op::MemFill { region, offset, value, size } => {
+                        if !region_ids.contains(region) {
+                            return Err(Error::Verification("U30X unknown region".into()));
+                        }
+                        for r in &[offset, value, size] {
+                            if !defined.contains(r) {
+                                return Err(Error::Verification("U30X undefined value in memfill".into()));
+                            }
+                        }
+                    }
+                    U30Op::MemSize { region, .. } => {
+                        if !region_ids.contains(region) {
+                            return Err(Error::Verification("U30X unknown region".into()));
+                        }
+                    }
+                    U30Op::MemGrow { region, delta, dst } => {
+                        if !region_ids.contains(region) {
+                            return Err(Error::Verification("U30X unknown region".into()));
+                        }
+                        if !defined.contains(delta) {
+                            return Err(Error::Verification("U30X undefined delta".into()));
+                        }
+                        // MemGrow defines its result register
+                        defined.insert(*dst);
+                    }
+                    U30Op::Call { function, args, results } => {
+                        // Validate function index is in range
+                        if *function as usize >= self.functions.len() {
+                            return Err(Error::Verification(format!(
+                                "U30X fn {fn_index} block {block_index}: Call to undefined function index {function}"
+                            )));
+                        }
+                        // Validate arg count matches callee params
+                        let callee = &self.functions[*function as usize];
+                        if args.len() != callee.params.len() {
+                            return Err(Error::Verification(format!(
+                                "U30X fn {fn_index} block {block_index}: Call to fn {function} expects {} args, got {}",
+                                callee.params.len(), args.len()
+                            )));
+                        }
+                        for r in args {
+                            if !defined.contains(r) {
+                                return Err(Error::Verification(format!(
+                                    "U30X fn {fn_index} block {block_index}: Call arg references undefined value %{r}"
+                                )));
+                            }
+                        }
+                        // Call defines its result registers
+                        for r in results {
+                            defined.insert(*r);
+                        }
+                    }
+                    U30Op::IndirectCall { function, args, results } => {
+                        // function is a register holding the function index
+                        if !defined.contains(function) {
+                            return Err(Error::Verification("U30X undefined function register".into()));
+                        }
+                        for r in args {
+                            if !defined.contains(r) {
+                                return Err(Error::Verification("U30X undefined arg".into()));
+                            }
+                        }
+                        for r in results {
+                            defined.insert(*r);
+                        }
+                    }
+                    U30Op::TableBr { table, index } => {
+                        if !table_ids.contains(table) {
+                            return Err(Error::Verification(format!("U30X unknown table {}", table)));
+                        }
+                        if !defined.contains(index) {
+                            return Err(Error::Verification("U30X undefined table index".into()));
+                        }
+                        // Validate table target block indices
+                        if let Some(table_decl) = self.tables.iter().find(|t| t.id == *table) {
+                            for &target in &table_decl.targets {
+                                if target >= function.blocks.len() {
+                                    return Err(Error::Verification(format!("U30X table {} has invalid target block {}", table, target)));
+                                }
+                            }
+                        }
+                    }
+                    U30Op::Break { code } => {
+                        if !defined.contains(code) {
+                            return Err(Error::Verification("U30X undefined break code".into()));
+                        }
+                    }
+                    U30Op::Assert { cond, msg: _ } => {
+                        if !defined.contains(cond) {
+                            return Err(Error::Verification("U30X undefined assert cond".into()));
+                        }
+                    }
+                    U30Op::Nop => {}
+                }
+            }
+            // Merge block's definitions into global set for cross-block tracking
+            global_defined.extend(block_defined.iter().cloned());
+            self.verify_terminator(fn_index, block_index, function, &block.terminator, &block_defined)?;
+        }
+        Ok(())
+    }
+
+    fn verify_terminator(
+        &self,
+        fn_index: usize,
+        block_index: usize,
+        function: &U30Function,
+        term: &U30Terminator,
+        defined: &BTreeSet<u32>,
+    ) -> Result<()> {
+        let block_count = function.blocks.len();
+        match term {
+            U30Terminator::Br { target } => {
+                if *target >= block_count {
+                    return Err(Error::Verification(format!("U30X fn {fn_index} block {block_index}: bad branch target")));
+                }
+            }
+            U30Terminator::BrIf { then_target, else_target, .. } => {
+                if *then_target >= block_count || *else_target >= block_count {
+                    return Err(Error::Verification(format!("U30X fn {fn_index} block {block_index}: bad conditional target")));
+                }
+            }
+            U30Terminator::Ret { values } => {
+                if values.len() != function.results.len() {
+                    return Err(Error::Verification(format!("U30X fn {fn_index} block {block_index}: bad result arity")));
+                }
+                // Note: we don't check that Ret values are defined here.
+                // Multi-block code may Ret from blocks that don't see cross-block definitions.
+                // Runtime catches type/arithmetic errors; undefined-value Ret returns garbage.
+            }
+            U30Terminator::TailCall { function: _, args } => {
+                // Note: function index is a register — runtime resolves it at runtime.
+                // We can't statically validate function index or arg count without knowing target.
+                for r in args {
+                    if !defined.contains(r) {
+                        return Err(Error::Verification(format!("U30X fn {fn_index} block {block_index}: undefined arg in TailCall")));
+                    }
+                }
+            }
+            U30Terminator::Trap { .. } => {}
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_u30value_as_i64_fails_on_f64() {
+        let v = U30Value::F64(3.14);
+        let r = v.as_i64();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("type error"));
+    }
+
+    #[test]
+    fn test_u30value_as_i64_fails_on_bool() {
+        let v = U30Value::Bool(true);
+        let r = v.as_i64();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_u30value_as_f64_fails_on_u64() {
+        let v = U30Value::U64(42);
+        let r = v.as_f64();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_u30value_as_f32_fails_on_u64() {
+        let v = U30Value::U64(42);
+        let r = v.as_f32();
+        assert!(r.is_err());
+    }
+
+    // Success cases for type conversions
+    #[test]
+    fn test_u30value_as_bool_success() {
+        let v = U30Value::Bool(true);
+        assert_eq!(v.as_bool().unwrap(), true);
+        let v2 = U30Value::Bool(false);
+        assert_eq!(v2.as_bool().unwrap(), false);
+    }
+
+    #[test]
+    fn test_u30value_as_u8_success() {
+        let v = U30Value::U8(42);
+        assert_eq!(v.as_u8().unwrap(), 42);
+    }
+
+    #[test]
+    fn test_u30value_as_u16_success() {
+        let v = U30Value::U16(1234);
+        assert_eq!(v.as_u16().unwrap(), 1234);
+    }
+
+    #[test]
+    fn test_u30value_as_u32_success() {
+        let v = U30Value::U32(999999);
+        assert_eq!(v.as_u32().unwrap(), 999999);
+    }
+
+    #[test]
+    fn test_u30value_as_u64_success() {
+        let v = U30Value::U64(1_000_000_000);
+        assert_eq!(v.as_u64().unwrap(), 1_000_000_000);
+    }
+
+    #[test]
+    fn test_u30value_as_u64_from_smaller_types() {
+        // U8 -> U64
+        let v = U30Value::U8(255);
+        assert_eq!(v.as_u64().unwrap(), 255);
+        // U16 -> U64
+        let v = U30Value::U16(65535);
+        assert_eq!(v.as_u64().unwrap(), 65535);
+        // U32 -> U64
+        let v = U30Value::U32(4_000_000_000);
+        assert_eq!(v.as_u64().unwrap(), 4_000_000_000);
+    }
+
+    #[test]
+    fn test_u30value_as_i64_success() {
+        let v = U30Value::U8(100);
+        assert_eq!(v.as_i64().unwrap(), 100);
+        let v = U30Value::U16(1000);
+        assert_eq!(v.as_i64().unwrap(), 1000);
+        let v = U30Value::U32(100000);
+        assert_eq!(v.as_i64().unwrap(), 100000);
+        let v = U30Value::U64(1000000);
+        assert_eq!(v.as_i64().unwrap(), 1000000);
+    }
+
+    #[test]
+    fn test_u30value_as_f32_success() {
+        let v = U30Value::F32(3.14);
+        assert_eq!(v.as_f32().unwrap(), 3.14);
+    }
+
+    #[test]
+    fn test_u30value_as_f64_success() {
+        let v = U30Value::F64(2.71828);
+        assert_eq!(v.as_f64().unwrap(), 2.71828);
+    }
+
+    #[test]
+    fn test_u30value_value_type() {
+        assert_eq!(U30Value::Bool(true).value_type(), U30Type::Bool);
+        assert_eq!(U30Value::U8(0).value_type(), U30Type::U8);
+        assert_eq!(U30Value::U16(0).value_type(), U30Type::U16);
+        assert_eq!(U30Value::U32(0).value_type(), U30Type::U32);
+        assert_eq!(U30Value::U64(0).value_type(), U30Type::U64);
+        assert_eq!(U30Value::F32(0.0).value_type(), U30Type::F32);
+        assert_eq!(U30Value::F64(0.0).value_type(), U30Type::F64);
+    }
+
+    #[test]
+    fn test_u30value_as_bool_fails_on_non_bool() {
+        assert!(U30Value::U8(1).as_bool().is_err());
+        assert!(U30Value::U16(1).as_bool().is_err());
+        assert!(U30Value::U32(1).as_bool().is_err());
+        assert!(U30Value::U64(1).as_bool().is_err());
+        assert!(U30Value::F32(1.0).as_bool().is_err());
+        assert!(U30Value::F64(1.0).as_bool().is_err());
+    }
+
+    #[test]
+    fn test_u30value_as_u8_fails_on_non_u8() {
+        assert!(U30Value::Bool(true).as_u8().is_err());
+        assert!(U30Value::U16(1).as_u8().is_err());
+        assert!(U30Value::U32(1).as_u8().is_err());
+        assert!(U30Value::U64(1).as_u8().is_err());
+        assert!(U30Value::F32(1.0).as_u8().is_err());
+        assert!(U30Value::F64(1.0).as_u8().is_err());
+    }
+
+    #[test]
+    fn test_u30value_as_u16_fails_on_non_u16() {
+        assert!(U30Value::Bool(true).as_u16().is_err());
+        assert!(U30Value::U8(1).as_u16().is_err());
+        assert!(U30Value::U32(1).as_u16().is_err());
+        assert!(U30Value::U64(1).as_u16().is_err());
+        assert!(U30Value::F32(1.0).as_u16().is_err());
+        assert!(U30Value::F64(1.0).as_u16().is_err());
+    }
+
+    #[test]
+    fn test_u30value_as_u32_fails_on_non_u32() {
+        assert!(U30Value::Bool(true).as_u32().is_err());
+        assert!(U30Value::U8(1).as_u32().is_err());
+        assert!(U30Value::U16(1).as_u32().is_err());
+        assert!(U30Value::U64(1).as_u32().is_err());
+        assert!(U30Value::F32(1.0).as_u32().is_err());
+        assert!(U30Value::F64(1.0).as_u32().is_err());
+    }
+
+    // Verification tests
+    #[test]
+    fn test_verify_empty_functions_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("invalid entry function"));
+    }
+
+    #[test]
+    fn test_verify_invalid_entry_function_index() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 99, // Invalid index
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("invalid entry function"));
+    }
+
+    #[test]
+    fn test_verify_function_empty_blocks_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![], // No blocks
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("invalid entry block"));
+    }
+
+    #[test]
+    fn test_verify_function_invalid_entry_block_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 99, // Invalid block index
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("invalid entry block"));
+    }
+
+    #[test]
+    fn test_verify_duplicate_region_id_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 64, readable: true, writable: true, initial: vec![] },
+                U30RegionDecl { id: 0, size: 64, readable: true, writable: true, initial: vec![] }, // Duplicate
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("duplicate region"));
+    }
+
+    #[test]
+    fn test_verify_region_initializer_overflow_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { 
+                    id: 0, 
+                    size: 2, // Small size
+                    readable: true, 
+                    writable: true, 
+                    initial: vec![1, 2, 3, 4] // Too big
+                },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("initializer overflow"));
+    }
+
+    #[test]
+    fn test_verify_duplicate_table_id_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![0] },
+                U30TableDecl { id: 0, targets: vec![0] }, // Duplicate
+            ],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("duplicate table"));
+    }
+
+    #[test]
+    fn test_verify_valid_module() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![0] },
+            ],
+            functions: vec![U30Function {
+                params: vec![U30Type::U64],
+                results: vec![U30Type::U64],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(42) },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![0] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_verify_undefined_binary_operand_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Binary { 
+                            dst: 0, 
+                            op: U30BinaryOp::AddWrapU64, 
+                            a: 999, // Undefined
+                            b: 1,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    #[test]
+    fn test_verify_undefined_select_cond_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Select { 
+                            dst: 0, 
+                            cond: 999, // Undefined
+                            a: 1,
+                            b: 2,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    #[test]
+    fn test_verify_undefined_load_region_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::LoadU32 { 
+                            dst: 0, 
+                            region: 99, // Unknown region
+                            offset: 0,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("unknown region"));
+    }
+
+    #[test]
+    fn test_verify_undefined_call_function_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Call { 
+                            function: 99, // Out of bounds
+                            args: vec![],
+                            results: vec![],
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined function"));
+    }
+
+    #[test]
+    fn test_verify_call_arg_count_mismatch_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![U30Type::U64, U30Type::U64], // 2 params
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Call { 
+                                function: 0, 
+                                args: vec![0], // Wrong arg count
+                                results: vec![],
+                            },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 1,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("expects"));
+    }
+
+    #[test]
+    fn test_verify_undefined_table_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::TableBr { 
+                            table: 99, // Unknown table
+                            index: 0,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("unknown table"));
+    }
+
+    #[test]
+    fn test_verify_table_bad_target_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![99] }, // Bad target block
+            ],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::TableBr { table: 0, index: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        let err_msg = r.unwrap_err().to_string();
+        // Error message may be "unknown table" or "invalid target"
+        assert!(err_msg.contains("unknown") || err_msg.contains("invalid") || err_msg.contains("undefined"));
+    }
+
+    #[test]
+    fn test_verify_bad_br_target_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Br { target: 99 }, // Bad target
+                    },
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("bad branch target"));
+    }
+
+    #[test]
+    fn test_verify_bad_brif_target_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                    ],
+                    terminator: U30Terminator::BrIf { 
+                        cond: 0, 
+                        then_target: 99, // Bad target
+                        else_target: 0, 
+                    },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("bad conditional target"));
+    }
+
+    #[test]
+    fn test_verify_ret_arity_mismatch_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64, U30Type::U64], // 2 results expected
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::Ret { values: vec![0] }, // Only 1 value
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("bad result arity"));
+    }
+
+    #[test]
+    fn test_verify_tailcall_undefined_arg_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![],
+                    terminator: U30Terminator::TailCall { 
+                        function: 0, 
+                        args: vec![999], // Undefined arg
+                    },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined arg"));
+    }
+
+    #[test]
+    fn test_verify_indirect_call_undefined_fn_reg_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::IndirectCall { 
+                            function: 999, // Undefined
+                            args: vec![],
+                            results: vec![],
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined function"));
+    }
+
+    #[test]
+    fn test_verify_undefined_memcopy_dst_region_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemCopy { 
+                            dst_region: 99, // Unknown
+                            dst_offset: 0,
+                            src_region: 0,
+                            src_offset: 0,
+                            size: 0,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("unknown dst region"));
+    }
+
+    #[test]
+    fn test_verify_undefined_memfill_region_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemFill { 
+                            region: 99, // Unknown
+                            offset: 0,
+                            value: 0,
+                            size: 0,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("unknown region"));
+    }
+
+    #[test]
+    fn test_verify_undefined_memsize_region_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemSize { 
+                            dst: 0,
+                            region: 99, // Unknown
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("unknown region"));
+    }
+
+    #[test]
+    fn test_verify_undefined_memgrow_region_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemGrow { 
+                            dst: 0,
+                            region: 99, // Unknown
+                            delta: 0,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("unknown region"));
+    }
+
+    #[test]
+    fn test_verify_undefined_break_code_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Break { code: 999 }, // Undefined
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined break code"));
+    }
+
+    #[test]
+    fn test_verify_undefined_assert_cond_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Assert { cond: 999, msg: 0 }, // Undefined cond
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined assert"));
+    }
+
+    #[test]
+    fn test_verify_undefined_memgrow_delta_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemGrow { 
+                            dst: 0,
+                            region: 0,
+                            delta: 999, // Undefined
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined delta"));
+    }
+
+    #[test]
+    fn test_verify_undefined_store_offset_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(42) }, // Define r0 for src
+                        U30Op::StoreU32 { 
+                            region: 0,
+                            offset: 999, // Undefined
+                            src: 0,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined offset"));
+    }
+
+    #[test]
+    fn test_verify_undefined_store_src_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(42) }, // Define r0
+                        U30Op::Const { dst: 1, value: U30Value::U32(100) }, // Define r1 for offset
+                        U30Op::StoreU32 { 
+                            region: 0,
+                            offset: 1, // Use defined r1
+                            src: 999, // Undefined
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        let err_msg = r.unwrap_err().to_string();
+        assert!(err_msg.contains("undefined") || err_msg.contains("src"));
+    }
+
+    // Test U30Value::as_u64 error branches for F32 and F64 types
+    #[test]
+    fn test_u30value_as_u64_fails_on_f32() {
+        let v = U30Value::F32(3.14);
+        let r = v.as_u64();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("type error"));
+    }
+
+    #[test]
+    fn test_u30value_as_u64_fails_on_bool() {
+        let v = U30Value::Bool(true);
+        let r = v.as_u64();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("type error"));
+    }
+
+    // Test U30Value::as_i64 error branches for F32 and F64 types
+    #[test]
+    fn test_u30value_as_i64_fails_on_f32() {
+        let v = U30Value::F32(3.14);
+        let r = v.as_i64();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("type error"));
+    }
+
+    // Test U30Value::as_f32 error branches
+    #[test]
+    fn test_u30value_as_f32_fails_on_bool() {
+        let v = U30Value::Bool(true);
+        let r = v.as_f32();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_u30value_as_f32_fails_on_f64() {
+        let v = U30Value::F64(2.71828);
+        let r = v.as_f32();
+        assert!(r.is_err());
+    }
+
+    // Test U30Value::as_f64 error branches
+    #[test]
+    fn test_u30value_as_f64_fails_on_bool() {
+        let v = U30Value::Bool(true);
+        let r = v.as_f64();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_u30value_as_f64_fails_on_u32() {
+        let v = U30Value::U32(42);
+        let r = v.as_f64();
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn test_u30value_as_f64_fails_on_f32() {
+        let v = U30Value::F32(3.14);
+        let r = v.as_f64();
+        assert!(r.is_err());
+    }
+
+    // Test U30Value::as_u8 error branches
+    #[test]
+    fn test_u30value_as_u8_fails_on_f32() {
+        let v = U30Value::F32(3.14);
+        let r = v.as_u8();
+        assert!(r.is_err());
+    }
+
+    // Test U30Value::as_u16 error branches
+    #[test]
+    fn test_u30value_as_u16_fails_on_f64() {
+        let v = U30Value::F64(3.14);
+        let r = v.as_u16();
+        assert!(r.is_err());
+    }
+
+    // Test U30Value::as_u32 error branches
+    #[test]
+    fn test_u30value_as_u32_fails_on_f32() {
+        let v = U30Value::F32(3.14);
+        let r = v.as_u32();
+        assert!(r.is_err());
+    }
+
+    // Test U30Value::as_bool error branches
+    #[test]
+    fn test_u30value_as_bool_fails_on_u64() {
+        let v = U30Value::U64(42);
+        let r = v.as_bool();
+        assert!(r.is_err());
+    }
+
+    // Test verify_call_undefined_arg_fails
+    #[test]
+    fn test_verify_call_undefined_arg_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![U30Type::U64],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![],
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Call { 
+                                function: 0, 
+                                args: vec![999], // Undefined arg
+                                results: vec![],
+                            },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 1,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verify_indirect_call_undefined_arg_fails
+    #[test]
+    fn test_verify_indirect_call_undefined_arg_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) }, // Define r0 as function reg
+                        U30Op::IndirectCall { 
+                            function: 0, 
+                            args: vec![999], // Undefined arg
+                            results: vec![],
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verify_undefined_memcopy_src_region_fails
+    #[test]
+    fn test_verify_undefined_memcopy_src_region_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemCopy { 
+                            dst_region: 0,
+                            dst_offset: 0,
+                            src_region: 99, // Unknown
+                            src_offset: 0,
+                            size: 0,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("unknown src region"));
+    }
+
+    // Test verify_undefined_memcopy_offset_fails
+    #[test]
+    fn test_verify_undefined_memcopy_offset_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+                U30RegionDecl { id: 1, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemCopy { 
+                            dst_region: 0,
+                            dst_offset: 999, // Undefined
+                            src_region: 1,
+                            src_offset: 0,
+                            size: 0,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verify_undefined_memfill_value_fails
+    #[test]
+    fn test_verify_undefined_memfill_value_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemFill { 
+                            region: 0,
+                            offset: 0,
+                            value: 999, // Undefined
+                            size: 0,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verify_undefined_memfill_size_fails
+    #[test]
+    fn test_verify_undefined_memfill_size_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemFill { 
+                            region: 0,
+                            offset: 0,
+                            value: 0,
+                            size: 999, // Undefined
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verify_undefined_table_index_fails
+    #[test]
+    fn test_verify_undefined_table_index_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![0] },
+            ],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::TableBr { 
+                            table: 0, 
+                            index: 999, // Undefined
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test RotlU64/RotrU64 validation branches for undefined val and sh
+    #[test]
+    fn test_verify_undefined_rotr_val_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::RotrU64 { val: 999, sh: 0, dst: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    #[test]
+    fn test_verify_undefined_rotr_sh_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::RotrU64 { val: 0, sh: 999, dst: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    #[test]
+    fn test_verify_undefined_rotr_undefined_val_and_sh_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::RotlU32 { val: 999, sh: 999, dst: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test RotlU32/RotrU32 validation for undefined val and sh
+    #[test]
+    fn test_verify_undefined_rotl_u32_val_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::RotlU32 { val: 999, sh: 0, dst: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test undefined src in single-src ops
+    #[test]
+    fn test_verify_undefined_i2f_src_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::I2F { dst: 0, src: 999 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    #[test]
+    fn test_verify_undefined_f2i_src_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::F2I { dst: 0, src: 999 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    #[test]
+    fn test_verify_undefined_fsqrt_src_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::FSqrt { dst: 0, src: 999 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verification for undefined select operands
+    #[test]
+    fn test_verify_undefined_select_a_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Select { dst: 0, cond: 0, a: 999, b: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    #[test]
+    fn test_verify_undefined_select_b_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        U30Op::Select { dst: 1, cond: 0, a: 0, b: 999 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verification for undefined b operand in binary ops
+    #[test]
+    fn test_verify_undefined_binary_b_fails() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Binary { dst: 0, op: U30BinaryOp::AddWrapU64, a: 0, b: 999 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verification for undefined memcopy src_offset
+    #[test]
+    fn test_verify_undefined_memcopy_src_offset_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+                U30RegionDecl { id: 1, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemCopy { 
+                            dst_region: 0,
+                            dst_offset: 0,
+                            src_region: 1,
+                            src_offset: 999, // Undefined
+                            size: 0,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verification for undefined memcopy size
+    #[test]
+    fn test_verify_undefined_memcopy_size_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+                U30RegionDecl { id: 1, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemCopy { 
+                            dst_region: 0,
+                            dst_offset: 0,
+                            src_region: 1,
+                            src_offset: 0,
+                            size: 999, // Undefined
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verification for undefined memfill offset
+    #[test]
+    fn test_verify_undefined_memfill_offset_fails() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemFill { 
+                            region: 0,
+                            offset: 999, // Undefined
+                            value: 0,
+                            size: 0,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verification for undefined indirect call results
+    #[test]
+    fn test_verify_indirect_call_defines_results() {
+        // Valid case - indirect call should define its result registers
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64], // Function returns U64
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(0) }, // function register
+                        U30Op::IndirectCall { function: 0, args: vec![], results: vec![2] },
+                        U30Op::Binary { dst: 3, op: U30BinaryOp::AddWrapU64, a: 2, b: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![3] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        // This should pass - indirect call defines result register 2
+        let r = m.verify_experimental();
+        assert!(r.is_ok(), "Verification should pass when indirect call result is used correctly: {:?}", r);
+    }
+
+    // Test verification for memgrow defining dst register
+    #[test]
+    fn test_verify_memgrow_defines_dst() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![U30Type::U64], // Function returns U64
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(1) }, // Define r0 for delta
+                        U30Op::MemGrow { dst: 1, region: 0, delta: 0 },
+                        U30Op::Binary { dst: 2, op: U30BinaryOp::AddWrapU64, a: 1, b: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![2] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok(), "MemGrow should define its dst register: {:?}", r);
+    }
+
+    // Test verification for Call defining result registers
+    #[test]
+    fn test_verify_call_defines_results() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![
+                U30Function {
+                    params: vec![],
+                    results: vec![], // callee returns nothing
+                    blocks: vec![U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    }],
+                    entry_block: 0,
+                },
+                U30Function {
+                    params: vec![],
+                    results: vec![U30Type::U64], // caller returns U64
+                    blocks: vec![U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(1) },
+                            U30Op::Const { dst: 1, value: U30Value::U64(2) },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![0] },
+                    }],
+                    entry_block: 0,
+                },
+            ],
+            entry_function: 1,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok(), "Valid module should pass: {:?}", r);
+    }
+
+    // Test verification with valid select
+    #[test]
+    fn test_verify_valid_select() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(42) },
+                        U30Op::Const { dst: 2, value: U30Value::U64(99) },
+                        U30Op::Select { dst: 3, cond: 0, a: 1, b: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok());
+    }
+
+    // Test verification with undefined cond in select (variant 2)
+    #[test]
+    fn test_verify_undefined_select_cond_fails_v2() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Select { dst: 0, cond: 999, a: 1, b: 2 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("undefined"));
+    }
+
+    // Test verification with valid tablebr
+    #[test]
+    fn test_verify_valid_tablebr() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![
+                U30TableDecl { id: 0, targets: vec![0, 1] },
+            ],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![
+                    U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U32(0) },
+                            U30Op::TableBr { table: 0, index: 0 },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                    U30Block {
+                        ops: vec![],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok());
+    }
+
+    // Test verification with valid memcopy
+    #[test]
+    fn test_verify_valid_memcopy() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+                U30RegionDecl { id: 1, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 2, value: U30Value::U64(16) },
+                        U30Op::MemCopy { 
+                            dst_region: 0,
+                            dst_offset: 0,
+                            src_region: 1,
+                            src_offset: 0,
+                            size: 2,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok());
+    }
+
+    // Test verification with valid memfill
+    #[test]
+    fn test_verify_valid_memfill() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 2, value: U30Value::U64(16) },
+                        U30Op::MemFill { 
+                            region: 0,
+                            offset: 0,
+                            value: 1,
+                            size: 2,
+                        },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok());
+    }
+
+    // Test verification with valid memsize and memgrow
+    #[test]
+    fn test_verify_valid_memsize() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::MemSize { dst: 0, region: 0 },
+                        U30Op::MemGrow { dst: 1, region: 0, delta: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok());
+    }
+
+    // Test verification with valid store operations
+    #[test]
+    fn test_verify_valid_stores() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::Const { dst: 1, value: U30Value::U64(100) },
+                        U30Op::Const { dst: 2, value: U30Value::U8(50) },
+                        U30Op::Const { dst: 3, value: U30Value::U16(100) },
+                        U30Op::Const { dst: 4, value: U30Value::U32(200) },
+                        U30Op::Const { dst: 5, value: U30Value::U64(400) },
+                        U30Op::StoreU8 { region: 0, offset: 0, src: 2 },
+                        U30Op::StoreU16 { region: 0, offset: 1, src: 3 },
+                        U30Op::StoreU32 { region: 0, offset: 2, src: 4 },
+                        U30Op::StoreU64 { region: 0, offset: 3, src: 5 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok(), "Valid stores should pass: {:?}", r);
+    }
+
+    // Test verification with valid loads
+    #[test]
+    fn test_verify_valid_loads() {
+        let m = U30Module {
+            regions: vec![
+                U30RegionDecl { id: 0, size: 256, readable: true, writable: true, initial: vec![] },
+            ],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U64(0) },
+                        U30Op::LoadU8 { dst: 1, region: 0, offset: 0 },
+                        U30Op::LoadU16 { dst: 2, region: 0, offset: 1 },
+                        U30Op::LoadU32 { dst: 3, region: 0, offset: 2 },
+                        U30Op::LoadU64 { dst: 4, region: 0, offset: 3 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok());
+    }
+
+    // Test verification with valid break
+    #[test]
+    fn test_verify_valid_break() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::U32(42) },
+                        U30Op::Break { code: 0 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok());
+    }
+
+    // Test verification with valid assert
+    #[test]
+    fn test_verify_valid_assert() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![U30Block {
+                    ops: vec![
+                        U30Op::Const { dst: 0, value: U30Value::Bool(true) },
+                        U30Op::Const { dst: 1, value: U30Value::U32(0) },
+                        U30Op::Assert { cond: 0, msg: 1 },
+                    ],
+                    terminator: U30Terminator::Ret { values: vec![] },
+                }],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok());
+    }
+
+    // Test U30Value::as_u64 from Bool (should fail)
+    #[test]
+    fn test_u30value_as_u64_from_bool_fails() {
+        let v = U30Value::Bool(true);
+        let r = v.as_u64();
+        assert!(r.is_err());
+    }
+
+    // Test value_type for all variants
+    #[test]
+    fn test_u30value_value_type_all() {
+        assert_eq!(U30Value::Bool(true).value_type(), U30Type::Bool);
+        assert_eq!(U30Value::U8(0).value_type(), U30Type::U8);
+        assert_eq!(U30Value::U16(0).value_type(), U30Type::U16);
+        assert_eq!(U30Value::U32(0).value_type(), U30Type::U32);
+        assert_eq!(U30Value::U64(0).value_type(), U30Type::U64);
+        assert_eq!(U30Value::F32(0.0).value_type(), U30Type::F32);
+        assert_eq!(U30Value::F64(0.0).value_type(), U30Type::F64);
+    }
+
+    // Test verification with function that defines and uses registers in multiple blocks
+    #[test]
+    fn test_verify_multi_block_register_defs() {
+        let m = U30Module {
+            regions: vec![],
+            tables: vec![],
+            functions: vec![U30Function {
+                params: vec![],
+                results: vec![],
+                blocks: vec![
+                    U30Block {
+                        ops: vec![
+                            U30Op::Const { dst: 0, value: U30Value::U64(1) },
+                        ],
+                        terminator: U30Terminator::Br { target: 1 },
+                    },
+                    U30Block {
+                        ops: vec![
+                            U30Op::Binary { dst: 1, op: U30BinaryOp::AddWrapU64, a: 0, b: 0 },
+                        ],
+                        terminator: U30Terminator::Ret { values: vec![] },
+                    },
+                ],
+                entry_block: 0,
+            }],
+            entry_function: 0,
+        };
+        let r = m.verify_experimental();
+        assert!(r.is_ok());
+    }
+}

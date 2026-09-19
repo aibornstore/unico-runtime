@@ -534,10 +534,585 @@ mod tests {
         ];
         let module_bytes = build_e2(vec![(code, 0, 2)]);
         let module = Module::parse(&module_bytes).unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().is_some_and(|e| e.contains("alignment")));
+    }
+
+    // ── Add ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_e2_add() {
+        // K r0=5, K r1=3, Add r2=r0+r1, RET r2 → 8
+        let code = vec![
+            0x0b, 0x00, 0x05,       // K.I64 r0=5
+            0x0b, 0x01, 0x03,       // K.I64 r1=3
+            0x13, 0x02, 0x00, 0x01, // Add r2=r0+r1
+            0xa6, 0x01, 0x02,       // RET r2
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(8));
+    }
+
+    #[test]
+    fn test_e2_add_overflow() {
+        // K r0=I64::MAX, K r1=1, Add r2=r0+r1 (wrapping) → I64::MIN
+        // I64::MAX SLEB: 0xff*9 + 0x00 (10 bytes)
+        let code = vec![
+            0x0b, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, // K.I64 r0=I64::MAX
+            0x0b, 0x01, 0x01,       // K.I64 r1=1
+            0x13, 0x02, 0x00, 0x01, // Add r2=r0+r1
+            0xa6, 0x01, 0x02,       // RET r2
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(i64::MIN));
+    }
+
+    // ── Cmp ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_e2_cmp_eq() {
+        // K r0=5, K r1=5, Cmp pred=0 (eq) r2=r0,r1, RET r2 → 1
+        let code = vec![
+            0x0b, 0x00, 0x05,       // K.I64 r0=5
+            0x0b, 0x01, 0x05,       // K.I64 r1=5
+            0x8c, 0x00, 0x02, 0x00, 0x01, // Cmp pred=0 r2=r0,r1
+            0xa6, 0x01, 0x02,       // RET r2
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(1));
+    }
+
+    #[test]
+    fn test_e2_cmp_lt() {
+        // K r0=3, K r1=5, Cmp pred=1 (lt) r2=r0,r1, RET r2 → 1
+        let code = vec![
+            0x0b, 0x00, 0x03,       // K.I64 r0=3
+            0x0b, 0x01, 0x05,       // K.I64 r1=5
+            0x8c, 0x01, 0x02, 0x00, 0x01, // Cmp pred=1 r2=r0,r1
+            0xa6, 0x01, 0x02,       // RET r2
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(1));
+    }
+
+    #[test]
+    fn test_e2_cmp_invalid_pred() {
+        // Cmp with pred=2 → execute error (not a verify error)
+        let code = vec![
+            0x0b, 0x00, 0x05,       // K.I64 r0=5
+            0x0b, 0x01, 0x03,       // K.I64 r1=3
+            0x8c, 0x02, 0x02, 0x00, 0x01, // Cmp pred=2 (invalid)
+            0xa6, 0x01, 0x02,       // RET r2
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 3)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module);
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(e) if e.to_string().contains("CMP pred")));
+    }
+
+    // ── Br ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_e2_br() {
+        // K r0=42, Br 2 → jumps to RET at index 2, RET r0 → 42
+        let code = vec![
+            0x0b, 0x00, 0x2a,       // K.I64 r0=42
+            0x8d, 0x02,               // Br target=2
+            0xa6, 0x01, 0x00,       // RET r0
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(42));
+    }
+
+    // ── BrIf ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_e2_brif_taken() {
+        // K r0=1, BrIf r0=1 target=2 (taken → skip K r1=100), RET r0 → 1
+        let code = vec![
+            0x0b, 0x00, 0x01,       // K.I64 r0=1
+            0x8e, 0x00, 0x02,       // BrIf r0 target=2
+            0x0b, 0x01, 0x64,       // K.I64 r1=100 (skipped)
+            0xa6, 0x01, 0x00,       // RET r0
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 2)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(1));
+    }
+
+    #[test]
+    fn test_e2_brif_not_taken() {
+        // K r0=0, BrIf r0=0 target=2 (not taken), K r1=100, RET r1 → 100
+        // 100 SLEB = 0xE4, 0x00 (2 bytes, since 100 has bit 6 set in 1-byte form)
+        let code = vec![
+            0x0b, 0x00, 0x00,       // K.I64 r0=0
+            0x8e, 0x00, 0x02,       // BrIf r0 target=2 (not taken)
+            0x0b, 0x01, 0xe4, 0x00, // K.I64 r1=100 (2-byte SLEB)
+            0xa6, 0x01, 0x01,       // RET r1
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 2)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(100));
+    }
+
+    // ── Call ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_e2_call() {
+        // f0: K r0=7, Call f1 args=[r0] result_reg=1, RET r1 → 14 (7+7)
+        // f1: Add r0=r0+r0, RET r0
+        let f1_code = vec![
+            0x13, 0x00, 0x00, 0x00, // Add r0=r0+r0 (arg passed in r0)
+            0xa6, 0x01, 0x00,       // RET r0
+        ];
+        let f0_code = vec![
+            0x0b, 0x00, 0x07,       // K.I64 r0=7
+            0x8f, 0x01, 0x01, 0x00, 0x01, 0x01, // Call f1 argc=1 args=[r0] result_reg=1
+            0xa6, 0x01, 0x01,       // RET r1
+        ];
+        let module_bytes = build_e2(vec![(f0_code, 0, 2), (f1_code, 1, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+
+        assert_eq!(result.status, Status::Pass);
+        assert_eq!(result.value, Some(14));
+    }
+
+    #[test]
+    fn test_e2_call_invalid_callee() {
+        // Call callee=99 (non-existent) → execution error
+        let f0_code = vec![
+            0x8f, 0x63, 0x01, 0x00, 0x01, 0x01, // Call callee=99 argc=1 args=[r0] result_reg=1
+            0xa6, 0x01, 0x01,       // RET r1
+        ];
+        let module_bytes = build_e2(vec![(f0_code, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module);
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(e) if e.to_string().contains("invalid callee")));
+    }
+
+    // ── Trap ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_e2_trap() {
+        let code = vec![0x00]; // Trap
+        let module_bytes = build_e2(vec![(code, 0, 0)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
+
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.as_ref().is_some_and(|e| e.contains("TRAP")));
+    }
+
+    // ── Verify errors ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_e2_verify_entry_params() {
+        let code = vec![0xa6, 0x01, 0x00]; // RET r0
+        let module_bytes = build_e2(vec![(code, 1, 1)]); // param_count=1 (entry must have 0)
+        let module = Module::parse(&module_bytes).unwrap();
+
+        assert!(module.verify().is_err());
+    }
+
+    #[test]
+    fn test_e2_verify_result_count() {
+        // Manually build module with result_count=2 (invalid)
+        let mut bytes = Vec::new();
+        bytes.extend(b"UNICO\xe2");
+        bytes.push(0x02); // FUNC section marker
+        let mut func_payload = encode_uleb(1); // 1 function
+        func_payload.extend(encode_uleb(0)); // param_count=0
+        func_payload.extend(encode_uleb(2)); // result_count=2 (invalid)
+        func_payload.extend(encode_uleb(1)); // register_count=1
+        func_payload.extend(encode_uleb(0)); // code_offset=0
+        func_payload.extend(encode_uleb(3)); // code_size=3
+        let code = vec![0xa6, 0x01, 0x00]; // RET r0
+        func_payload.extend(code.clone());
+        bytes.extend(encode_uleb(func_payload.len()));
+        bytes.extend(func_payload);
+        bytes.push(0x03); // CODE section
+        bytes.extend(encode_uleb(3)); // code_section_len=3
+        bytes.extend(code);
+        bytes.push(0x00); // END
+        let module = Module::parse(&bytes);
+        assert!(module.is_err());
+    }
+
+    #[test]
+    fn test_e2_verify_no_ret() {
+        // Function body without RET or TRAP at end
+        let code = vec![0x0b, 0x00, 0x05]; // K.I64 r0=5 (no RET)
+        let module_bytes = build_e2(vec![(code, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        assert!(module.verify().is_err());
+    }
+
+    #[test]
+    fn test_e2_verify_empty_body() {
+        // Function with no instructions
+        let code = vec![];
+        let module_bytes = build_e2(vec![(code, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        assert!(module.verify().is_err());
+    }
+
+    // ── Parse errors ────────────────────────────────────────────────────
+
+    #[test]
+    fn test_e2_parse_bad_magic() {
+        let bytes = vec![0x00, 0x01, 0x02, 0x03, 0x04, 0x05];
+        assert!(Module::parse(&bytes).is_err());
+    }
+
+    #[test]
+    fn test_e2_parse_missing_func() {
+        let mut bytes = Vec::new();
+        bytes.extend(b"UNICO\xe2");
+        // No FUNC section marker (0x02)
+        bytes.push(0x00); // Just END marker without proper structure
+        assert!(Module::parse(&bytes).is_err());
+    }
+
+    #[test]
+    fn test_e2_parse_missing_code() {
+        // Has FUNC but no CODE section
+        let mut bytes = Vec::new();
+        bytes.extend(b"UNICO\xe2");
+        bytes.push(0x02); // FUNC section marker
+        bytes.extend(encode_uleb(0)); // func_section_len=0
+        bytes.push(0x03); // CODE section marker
+        bytes.extend(encode_uleb(0)); // code_section_len=0
+        // Missing END marker
+        assert!(Module::parse(&bytes).is_err());
+    }
+
+    #[test]
+    fn test_e2_parse_missing_end() {
+        let code = vec![0xa6, 0x01, 0x00];
+        let module_bytes = build_e2(vec![(code, 0, 1)]);
+        let mut truncated = module_bytes.clone();
+        truncated.pop(); // Remove END byte
+        assert!(Module::parse(&truncated).is_err());
+    }
+
+    #[test]
+    fn test_e2_parse_truncated_uleb() {
+        let mut bytes = Vec::new();
+        bytes.extend(b"UNICO\xe2");
+        bytes.push(0x02); // FUNC section marker
+        bytes.push(0x01); // func_section_len=1
+        bytes.push(0x01); // only 1 byte of what should be more
+        assert!(Module::parse(&bytes).is_err());
+    }
+
+    #[test]
+    fn test_e2_parse_unknown_opcode() {
+        // Unknown opcode 0xFF in code section → parse error in decode_instructions
+        let code = vec![0xff];
+        let module_bytes = build_e2(vec![(code, 0, 0)]);
+        assert!(Module::parse(&module_bytes).is_err());
+    }
+
+    #[test]
+    fn test_e2_parse_code_out_of_bounds() {
+        // Function code_offset points beyond code section
+        let mut bytes = Vec::new();
+        bytes.extend(b"UNICO\xe2");
+        bytes.push(0x02);
+        let mut func_payload = encode_uleb(1); // 1 function
+        func_payload.extend(encode_uleb(0)); // param_count=0
+        func_payload.extend(encode_uleb(1)); // result_count=1
+        func_payload.extend(encode_uleb(1)); // register_count=1
+        func_payload.extend(encode_uleb(255)); // code_offset=255 (way out of bounds)
+        func_payload.extend(encode_uleb(1)); // code_size=1
+        let code = vec![0x0b, 0x00, 0x00]; // actual code (3 bytes)
+        func_payload.extend(code.clone());
+        bytes.extend(encode_uleb(func_payload.len()));
+        bytes.extend(func_payload);
+        bytes.push(0x03);
+        bytes.extend(encode_uleb(3)); // code_section_len=3
+        bytes.extend(code);
+        bytes.push(0x00); // END
+        let module = Module::parse(&bytes);
+        assert!(module.is_err());
+    }
+    
+    // ── Module::verify error paths ─────────────────────────────────────────
+    
+    #[test]
+    fn test_e2_verify_empty_functions() {
+        let module = Module { profile: Profile::E2, functions: vec![] };
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("No functions"));
+    }
+    
+    #[test]
+    fn test_e2_verify_entry_must_have_zero_params() {
+        let code = vec![0xa6, 0x01, 0x00]; // RET r0
+        let module_bytes = build_e2(vec![(code, 1, 1)]); // param_count=1
+        let module = Module::parse(&module_bytes).unwrap();
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("0 params"));
+    }
+    
+    #[test]
+    fn test_e2_verify_func_result_count() {
+        // Function with result_count=2
+        let mut bytes = Vec::new();
+        bytes.extend(b"UNICO\xe2");
+        bytes.push(0x02);
+        let mut func_payload = encode_uleb(1); // 1 function
+        func_payload.extend(encode_uleb(0)); // param_count=0
+        func_payload.extend(encode_uleb(2)); // result_count=2 (invalid)
+        func_payload.extend(encode_uleb(1)); // register_count=1
+        func_payload.extend(encode_uleb(0)); // code_offset=0
+        let code = vec![0xa6, 0x01, 0x00]; // RET r0
+        func_payload.extend(encode_uleb(code.len()));
+        func_payload.extend(code.clone());
+        bytes.extend(encode_uleb(func_payload.len()));
+        bytes.extend(func_payload);
+        bytes.push(0x03);
+        bytes.extend(encode_uleb(code.len()));
+        bytes.extend(code);
+        bytes.push(0x00);
+        let module = Module::parse(&bytes);
+        assert!(module.is_err());
+    }
+    
+    #[test]
+    fn test_e2_verify_func_registers_less_than_params() {
+        // func with param_count=2 but register_count=1 — verify should fail
+        let code = vec![0xa6, 0x01, 0x00];
+        let module_bytes = build_e2(vec![(code, 2, 1)]); // param_count=2, reg_count=1
+        let module = Module::parse(&module_bytes).unwrap();
+        let r = module.verify();
+        assert!(r.is_err(), "Expected verification error");
+    }
+    
+    #[test]
+    fn test_e2_verify_func_empty_body() {
+        let code = vec![];
+        let module_bytes = build_e2(vec![(code, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("empty"));
+    }
+    
+    #[test]
+    fn test_e2_verify_func_no_ret() {
+        let code = vec![0x0b, 0x00, 0x05]; // K.I64 r0=5 (no terminator)
+        let module_bytes = build_e2(vec![(code, 0, 1)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("end with RET or TRAP"));
+    }
+    
+    #[test]
+    fn test_e2_verify_func_no_ret_trap() {
+        // Function ending with K.I64 (not RET or TRAP)
+        let code = vec![0x0b, 0x00, 0x05, 0x0b, 0x01, 0x03]; // two KImm, no terminator
+        let module_bytes = build_e2(vec![(code, 0, 2)]);
+        let module = Module::parse(&module_bytes).unwrap();
+        let r = module.verify();
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("end with RET or TRAP"));
+    }
+    
+    // ── E2Executor::execute error paths ─────────────────────────────────────
+    
+    #[test]
+    fn test_e2_execute_empty_functions() {
+        let module = Module { profile: Profile::E2, functions: vec![] };
+        let mut exec = E2Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("No functions"));
+    }
+    
+    #[test]
+    fn test_e2_execute_entry_non_zero_params() {
+        let code = vec![0xa6, 0x01, 0x00];
+        let module_bytes = build_e2(vec![(code, 1, 1)]); // param_count=1
+        let module = Module::parse(&module_bytes).unwrap();
+        let mut exec = E2Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("0 parameters"));
+    }
+    
+    #[test]
+    fn test_e2_execute_call_stack_overflow() {
+        // Create 9 nested calls (max is 8)
+        
+        // f0: call f1
+        let f0 = vec![
+            0x8f, 0x01, 0x01, 0x00, 0x01, 0x01, // Call f1 argc=1 args=[r0] result_count=1 result_reg=1
+            0xa6, 0x01, 0x01,                   // RET r1
+        ];
+        
+        // f1..f8: identical — each calls the next
+        let inner = vec![
+            0x8f, 0x02, 0x01, 0x00, 0x01, 0x01, // Call f{n+1} argc=1 args=[r0] result_count=1 result_reg=1
+            0xa6, 0x01, 0x01,                   // RET r1
+        ];
+        
+        let mut functions = vec![(f0, 0, 2)]; // f0: no params, 2 regs
+        for _ in 1..=9 {
+            functions.push((inner.clone(), 1, 2)); // each inner: 1 param, 2 regs
+        }
+        
+        let module_bytes = build_e2(functions);
+        let module = Module::parse(&module_bytes).unwrap();
+        module.verify().unwrap();
+        
+        let mut exec = E2Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("overflow"));
+    }
+    
+    #[test]
+    fn test_e2_execute_fell_off_end() {
+        // Module whose sole function ends with KImm (no RET/TRAP).
+        // build_e2 always generates valid modules ending with RET/TRAP,
+        // so we build the module manually with the KImm-only code.
+        //
+        // Structure:
+        // FUNC section: func_count=1, then descriptor (5 bytes)
+        //   descriptor: param_count=0, result_count=1, register_count=1,
+        //               code_offset=0, code_size=3
+        //   FUNC section total = 1 + 5 = 6 bytes
+        // CODE section: code_len=3, then 3 bytes of KImm code
+        // END: 0x00
+        let mut bytes = Vec::new();
+        bytes.extend(b"UNICO\xe2");
+        bytes.push(0x02); // FUNC tag
+        // FUNC section payload (before length prefix):
+        //   func_count=1 + descriptor(5) = 6 bytes
+        bytes.extend(encode_uleb(6)); // section payload length
+        bytes.push(0x01); // func_count=1
+        // Function descriptor:
+        bytes.extend(encode_uleb(0)); // param_count=0
+        bytes.extend(encode_uleb(1)); // result_count=1
+        bytes.extend(encode_uleb(1)); // register_count=1
+        bytes.extend(encode_uleb(0)); // code_offset=0
+        bytes.extend(encode_uleb(3)); // code_size=3
+        bytes.push(0x03); // CODE tag
+        bytes.extend(encode_uleb(3)); // code_section_len=3
+        bytes.extend([0x0bu8, 0x00, 0x05]); // K.I64 r0=5 (no terminator)
+        bytes.push(0x00); // END
+        let module = Module::parse(&bytes).unwrap();
+        // verify() would catch this, but we skip it to test execute
+        let mut exec = E2Executor::new();
+        let r = exec.execute(&module);
+        assert!(r.is_err());
+        assert!(r.unwrap_err().to_string().contains("fell off end"));
+    }
+    
+    // ── Additional LOAD error paths ─────────────────────────────────────────
+    
+    #[test]
+    fn test_load_memory_oob() {
+        // LOAD from address 4096 (> 4088 boundary).
+        let code = vec![
+            0x0b, 0x00, 0x80, 0xE0, // K.I64 r0=4096 (2-byte SLEB)
+            0x91, 0x01, 0x00,         // LOAD r1=[r0]
+            0xa6, 0x01, 0x01,         // RET r1
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 2)]);
+        let module = Module::parse(&module_bytes).unwrap();
         
         let mut exec = E2Executor::new();
         let result = exec.execute(&module).unwrap();
+        assert_eq!(result.status, Status::Fail);
+        assert!(result.error.is_some(), "Expected execution error for OOB");
+    }
+    
+    #[test]
+    fn test_load_memory_unaligned() {
+        // LOAD from address 1 (misaligned)
+        let code = vec![
+            0x0b, 0x00, 0x01,       // K.I64 r0=1 (misaligned)
+            0x91, 0x01, 0x00,       // LOAD r1=[r0]
+            0xa6, 0x01, 0x01,       // RET r1
+        ];
+        let module_bytes = build_e2(vec![(code, 0, 2)]);
+        let module = Module::parse(&module_bytes).unwrap();
         
+        let mut exec = E2Executor::new();
+        let result = exec.execute(&module).unwrap();
         assert_eq!(result.status, Status::Fail);
         assert!(result.error.as_ref().is_some_and(|e| e.contains("alignment")));
     }

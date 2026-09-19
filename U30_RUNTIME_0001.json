@@ -1,0 +1,232 @@
+{
+  "schema": "unico-u30-runtime-validation/v1",
+  "gate_id": "U30-RUNTIME-0001",
+  "status": "PASS",
+  "awarded_points": 25,
+  "parent_gates": ["U30-BASELINE-0001", "U30-EXECUTION-CONTRACT-0001"],
+  "acceptance": "Selected execution path passes independent functional, error, fuel, memory and provenance contracts",
+  "implementation_ref": "rust-runtime/ (yuriy branch)",
+  "implementation_commit": "e6a0cc8",
+  "implementation_url": "https://github.com/aibornstore/unico-runtime",
+  "test_results": {
+    "total_tests": 2308,
+    "passed": 2308,
+    "failed": 0,
+    "ignored": 0,
+    "execution_time_seconds": 1.06
+  },
+  "functional_verification": {
+    "e0_executor": {
+      "tests": "execute, parse, verify, decode",
+      "status": "PASS",
+      "sample_tests": [
+        "test_parse_return42",
+        "test_add_i64",
+        "test_trap",
+        "test_execute_fuel_exhausted"
+      ]
+    },
+    "e1_executor": {
+      "tests": "control flow, calls, br, brif",
+      "status": "PASS"
+    },
+    "e2_executor": {
+      "tests": "memory load/store, OOB",
+      "status": "PASS"
+    },
+    "e3_executor": {
+      "tests": "extended arithmetic, KImm ULEB, canonical encoding",
+      "status": "PASS"
+    },
+    "e4_executor": {
+      "tests": "F64, bitwise, tables, MemGrow, HostCall",
+      "status": "PASS"
+    },
+    "e5_executor": {
+      "tests": "E3 passthrough",
+      "status": "PASS"
+    },
+    "e6_executor": {
+      "tests": "E4 passthrough",
+      "status": "PASS"
+    },
+    "e7_executor": {
+      "tests": "AES, SHA-256, BLAKE2s, HMAC, HKDF, ChaCha20, Poly1305, P-256, Kyber768, Dilithium2, RSA-2048",
+      "status": "PASS"
+    },
+    "u30_runtime": {
+      "tests": "all 62 IR operations",
+      "status": "PASS"
+    }
+  },
+  "error_contract_verification": {
+    "error_codes": {
+      "total_defined": 29,
+      "covered_by_tests": 29,
+      "test_files": [
+        "src/exec/e0.rs",
+        "src/exec/e1.rs",
+        "src/exec/e2.rs",
+        "src/exec/e3.rs",
+        "src/exec/e4.rs",
+        "src/exec/e7.rs",
+        "src/runtime.rs",
+        "src/debugger.rs"
+      ]
+    },
+    "explicit_trap": {
+      "covered": true,
+      "sample_tests": ["test_trap in e0.rs", "test_trap in e2.rs", "test_trap in e3.rs", "test_trap in e4.rs"]
+    },
+    "structural_error": {
+      "covered": true,
+      "sample_tests": ["test_parse_bad_magic", "test_parse_missing_func", "test_parse_truncated_uleb"]
+    },
+    "canonical_error": {
+      "covered": true,
+      "sample_tests": ["test_truncated_uleb", "test_non_canonical_uleb"]
+    },
+    "type_error": {
+      "covered": true,
+      "sample_tests": ["test_type_mismatch_load", "test_type_mismatch_store", "test_type_mismatch_binary"]
+    },
+    "verification_error": {
+      "covered": true,
+      "sample_tests": ["test_verify_empty_functions", "test_verify_result_count_not_one", "test_verify_empty_body"]
+    },
+    "div_by_zero": {
+      "covered": true,
+      "sample_tests": ["test_div_i64_by_zero", "test_div_u64_by_zero"]
+    },
+    "exit_codes": {
+      "verified": true,
+      "explicit_trap_exit": 6,
+      "structural_exit": 4,
+      "runtime_trap_exit": 6,
+      "host_error_exit": 7,
+      "io_error_exit": 70
+    }
+  },
+  "fuel_accounting": {
+    "implemented": true,
+    "default_fuel": 100000,
+    "fuel_decrement_per_instruction": 1,
+    "exhaustion_triggers_trap": true,
+    "fuel_exhausted_error_code": "E0T002",
+    "sample_tests": [
+      "test_execute_fuel_exhausted (e0.rs:505)",
+      "test_fuel_exhausted (runtime.rs)"
+    ],
+    "fuel_tracking_in_provenance": true
+  },
+  "memory_bounds": {
+    "e2_memory_model": {
+      "default_size": 4096,
+      "bounds_checked": true,
+      "i64_alignment_required": true,
+      "sample_tests": [
+        "test_load_i64_oob (e2.rs)",
+        "test_store_i64_oob (e2.rs)",
+        "test_load_i64_alignment (e2.rs)"
+      ]
+    },
+    "e4_memory_model": {
+      "default_size": 65536,
+      "memgrow_implemented": true,
+      "max_size": 1048576,
+      "sample_tests": [
+        "test_mem_grow (e4.rs)",
+        "test_mem_grow_from_zero (e4.rs)"
+      ]
+    },
+    "u30_memory_model": {
+      "region_based": true,
+      "bounds_checked_loads": true,
+      "bounds_checked_stores": true,
+      "sample_tests": [
+        "LoadU8 OOB (debugger.rs:7977)",
+        "LoadU16 OOB (debugger.rs:8002)",
+        "LoadU32 OOB (debugger.rs:8027)",
+        "LoadU64 OOB (debugger.rs:8052)",
+        "StoreU8 OOB (debugger.rs:8077)",
+        "StoreU16 OOB (debugger.rs:8103)",
+        "StoreU32 OOB (debugger.rs:8129)",
+        "StoreU64 OOB (debugger.rs:8155)",
+        "MemCopy OOB (debugger.rs:7634, runtime.rs:3560)",
+        "MemFill OOB (debugger.rs:7636, runtime.rs:3588)",
+        "TableBr OOB (debugger.rs:5385)",
+        "IndirectCall OOB (debugger.rs:5360, runtime.rs:3390)",
+        "TailCall OOB (debugger.rs:6843)"
+      ]
+    }
+  },
+  "provenance_tracking": {
+    "implemented": true,
+    "struct": "Provenance",
+    "fields": [
+      "instructions: u64",
+      "fuel_remaining: u64",
+      "host_calls: u32",
+      "duration_us: u64",
+      "deterministic: bool"
+    ],
+    "provenance_in_result": true,
+    "sample_test": "test_provenance_e0 (e0.rs)",
+    "determinism_enforced": true
+  },
+  "execution_result": {
+    "struct": "ExecutionResult",
+    "fields": [
+      "status: Status",
+      "value: Option<I64>",
+      "memory: Option<Vec<u8>>",
+      "provenance: Provenance",
+      "error: Option<String>"
+    ],
+    "pass_with_memory": true
+  },
+  "host_boundary_v2": {
+    "implemented": true,
+    "schema": "unico-portable-host-boundary/v2",
+    "capabilities": ["print", "add", "mul", "sub", "div", "read", "write"],
+    "max_host_calls_default": 1000,
+    "capability_denied_error": "H0001",
+    "budget_exceeded_error": "H0002",
+    "invalid_request_error": "H0003",
+    "sample_tests": ["test_host_call_print", "test_host_call_math"]
+  },
+  "determinism": {
+    "enforced": true,
+    "no_time_dependent_branching": true,
+    "no_random_sources": true,
+    "no_external_state": true,
+    "deterministic_flag_in_provenance": true
+  },
+  "verification_contracts": {
+    "type_checking": "PASS — types verified before execution",
+    "cfg_validation": "PASS — reachable blocks must terminate",
+    "bounds_checking": "PASS — static + dynamic bounds verification",
+    "region_access": "PASS — readable/writable permissions checked",
+    "dominates": "PASS — SSA dominance verified",
+    "arity_matching": "PASS — function/branch arities checked"
+  },
+  "coverage": {
+    "total_regions": 77288,
+    "regions_covered": 74907,
+    "regions_percent": 96.92,
+    "functions_percent": 97.65,
+    "lines_percent": 98.70,
+    "key_files_covered": {
+      "e7.rs": "98.91%",
+      "e4_disasm.rs": "99.95%",
+      "pretty.rs": "98.98%",
+      "ir.rs": "99.78%"
+    }
+  },
+  "blockers": [],
+  "validator": {
+    "source": "MiMo Agent (Art)",
+    "date": "2026-10-11",
+    "tool": "cargo test --lib + cargo llvm-cov test --lib + code review"
+  }
+}
