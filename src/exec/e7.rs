@@ -1051,8 +1051,8 @@ impl BI5 {
 
         // Return reduced limbs
         if h2 >= 4 {
-            // h1 >> 128 wraps to 0 for u128, guard explicitly
-            let extra = if h1 > u128::MAX { 1 } else { 0 };
+            // h1 >> 128 wraps to 0 for u128, guard for overflow when adding 5
+            let extra = if h1 > u128::MAX.wrapping_sub(5) { 1 } else { 0 };
             BI5([(h1 as u64), ((h1 >> 64) as u64), ((extra + 5) & 3) as u64])
         } else {
             BI5([(h1 as u64), ((h1 >> 64) as u64), 0])

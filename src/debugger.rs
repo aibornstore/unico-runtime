@@ -901,7 +901,7 @@ impl U30Debugger {
             }
             U30Op::MemSize { dst, region } => {
                 let data = self.state.regions.get(region)
-                    .ok_or_else(|| Error::Generic(format!("U30X unknown region")))?;
+                    .ok_or_else(|| Error::Generic("U30X unknown region".to_string()))?;
                 self.state.set_reg(*dst, U30Value::U64(data.bytes.len() as u64));
             }
             U30Op::MemGrow { dst, region: _, delta } => {

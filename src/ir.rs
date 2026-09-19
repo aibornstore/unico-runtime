@@ -626,38 +626,38 @@ impl U30Module {
                     }
                     U30Op::MemCopy { dst_region, dst_offset, src_region, src_offset, size } => {
                         if !region_ids.contains(dst_region) {
-                            return Err(Error::Verification(format!("U30X unknown dst region")));
+                            return Err(Error::Verification("U30X unknown dst region".into()));
                         }
                         if !region_ids.contains(src_region) {
-                            return Err(Error::Verification(format!("U30X unknown src region")));
+                            return Err(Error::Verification("U30X unknown src region".into()));
                         }
                         for r in &[dst_offset, src_offset, size] {
                             if !defined.contains(r) {
-                                return Err(Error::Verification(format!("U30X undefined value in memcopy")));
+                                return Err(Error::Verification("U30X undefined value in memcopy".into()));
                             }
                         }
                     }
                     U30Op::MemFill { region, offset, value, size } => {
                         if !region_ids.contains(region) {
-                            return Err(Error::Verification(format!("U30X unknown region")));
+                            return Err(Error::Verification("U30X unknown region".into()));
                         }
                         for r in &[offset, value, size] {
                             if !defined.contains(r) {
-                                return Err(Error::Verification(format!("U30X undefined value in memfill")));
+                                return Err(Error::Verification("U30X undefined value in memfill".into()));
                             }
                         }
                     }
                     U30Op::MemSize { region, .. } => {
                         if !region_ids.contains(region) {
-                            return Err(Error::Verification(format!("U30X unknown region")));
+                            return Err(Error::Verification("U30X unknown region".into()));
                         }
                     }
                     U30Op::MemGrow { region, delta, dst } => {
                         if !region_ids.contains(region) {
-                            return Err(Error::Verification(format!("U30X unknown region")));
+                            return Err(Error::Verification("U30X unknown region".into()));
                         }
                         if !defined.contains(delta) {
-                            return Err(Error::Verification(format!("U30X undefined delta")));
+                            return Err(Error::Verification("U30X undefined delta".into()));
                         }
                         // MemGrow defines its result register
                         defined.insert(*dst);
@@ -692,11 +692,11 @@ impl U30Module {
                     U30Op::IndirectCall { function, args, results } => {
                         // function is a register holding the function index
                         if !defined.contains(function) {
-                            return Err(Error::Verification(format!("U30X undefined function register")));
+                            return Err(Error::Verification("U30X undefined function register".into()));
                         }
                         for r in args {
                             if !defined.contains(r) {
-                                return Err(Error::Verification(format!("U30X undefined arg")));
+                                return Err(Error::Verification("U30X undefined arg".into()));
                             }
                         }
                         for r in results {
@@ -708,7 +708,7 @@ impl U30Module {
                             return Err(Error::Verification(format!("U30X unknown table {}", table)));
                         }
                         if !defined.contains(index) {
-                            return Err(Error::Verification(format!("U30X undefined table index")));
+                            return Err(Error::Verification("U30X undefined table index".into()));
                         }
                         // Validate table target block indices
                         if let Some(table_decl) = self.tables.iter().find(|t| t.id == *table) {
@@ -721,12 +721,12 @@ impl U30Module {
                     }
                     U30Op::Break { code } => {
                         if !defined.contains(code) {
-                            return Err(Error::Verification(format!("U30X undefined break code")));
+                            return Err(Error::Verification("U30X undefined break code".into()));
                         }
                     }
                     U30Op::Assert { cond, msg: _ } => {
                         if !defined.contains(cond) {
-                            return Err(Error::Verification(format!("U30X undefined assert cond")));
+                            return Err(Error::Verification("U30X undefined assert cond".into()));
                         }
                     }
                     U30Op::Nop => {}

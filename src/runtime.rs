@@ -648,13 +648,13 @@ impl U30Runtime {
                 let n = self.reg(regs, *size)?.as_u64()? as usize;
                 let src_readable = regions.get(src_region)
                     .map(|s| s.readable)
-                    .ok_or_else(|| Error::Generic(format!("U30X missing src region")))?;
+                    .ok_or_else(|| Error::Generic("U30X missing src region".to_string()))?;
                 if !src_readable {
                     return Err(Error::Generic("U30X memcopy src not readable".into()));
                 }
                 let dst_writable = regions.get(dst_region)
                     .map(|s| s.writable)
-                    .ok_or_else(|| Error::Generic(format!("U30X missing dst region")))?;
+                    .ok_or_else(|| Error::Generic("U30X missing dst region".to_string()))?;
                 if !dst_writable {
                     return Err(Error::Generic("U30X memcopy dst not writable".into()));
                 }
@@ -671,7 +671,7 @@ impl U30Runtime {
                 let val = self.reg(regs, *value)?.as_u32()? as u8;
                 let n = self.reg(regs, *size)?.as_u64()? as usize;
                 let state = regions.get_mut(region)
-                    .ok_or_else(|| Error::Generic(format!("U30X missing region")))?;
+                    .ok_or_else(|| Error::Generic("U30X missing region".to_string()))?;
                 if !state.writable {
                     return Err(Error::Generic("U30X memfill not writable".into()));
                 }
@@ -682,13 +682,13 @@ impl U30Runtime {
             }
             U30Op::MemSize { dst, region } => {
                 let state = regions.get(region)
-                    .ok_or_else(|| Error::Generic(format!("U30X missing region")))?;
+                    .ok_or_else(|| Error::Generic("U30X missing region".to_string()))?;
                 regs.insert(*dst, U30Value::U64(state.bytes.len() as u64));
             }
             U30Op::MemGrow { dst, region, delta } => {
                 let d = self.reg(regs, *delta)?.as_u64()? as usize;
                 let state = regions.get_mut(region)
-                    .ok_or_else(|| Error::Generic(format!("U30X missing region")))?;
+                    .ok_or_else(|| Error::Generic("U30X missing region".to_string()))?;
                 if !state.writable {
                     return Err(Error::Generic(format!("U30X region {region} is not writable")));
                 }
