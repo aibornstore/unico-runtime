@@ -1,0 +1,56 @@
+{
+  "schema": "ARTWEB_PROJECT_RECOVERY_MANIFEST_V1",
+  "project": "UNICO Runtime",
+  "repository": "aibornstore/unico-runtime",
+  "recovery_root": null,
+  "recovery_requires_primary_working_disk": true,
+  "canonical_standard": "aibornstore/connect-canon/docs/ARTWEB_PROJECT_RECOVERY_CONTINUITY_STANDARD_V1.md",
+  "channels": [
+    {
+      "name": "primary-control",
+      "kind": null,
+      "source": null,
+      "target": null,
+      "status": "NEEDS_RUNTIME_CERTIFICATION",
+      "notes": "Discover and verify the project's actual primary control path."
+    },
+    {
+      "name": "independent-recovery",
+      "kind": null,
+      "source": null,
+      "target": null,
+      "status": "NOT_AVAILABLE",
+      "notes": "Implement independently; do not copy another project's host/IP/path values."
+    }
+  ],
+  "artifacts": {
+    "status": "RECOVERY_STATUS.json",
+    "manifest": ".artweb/PROJECT_RECOVERY_MANIFEST.json",
+    "continuity": "PROJECT_CONTINUITY.json",
+    "runbook": "docs/operations/PROJECT_RECOVERY_CONTINUITY.md",
+    "golden": "golden-current"
+  },
+  "continuity": {
+    "canonical_path": null,
+    "branch": "master",
+    "head": null,
+    "dirty_count": null,
+    "emergency_copy": null,
+    "next_step": "Bind live host/path/repository state and runtime-certify recovery."
+  },
+  "invariants": [
+    "At least two independent recovery channels where technically possible.",
+    "Recovery-critical state must not depend on a known-degraded disk/path.",
+    "After interrupted chat/tool streams, reconcile live state before retrying.",
+    "Never store secrets/durable sessions/private keys in GitHub recovery documentation."
+  ],
+  "forbidden_recovery_sources": [],
+  "certification": {
+    "recovery_root": "PENDING",
+    "channel_failover": "PENDING",
+    "self_heal": "PENDING",
+    "fault_injection": "PENDING",
+    "continuity_restore": "PENDING"
+  },
+  "status": "STANDARD_LINKED_NEEDS_RUNTIME_CERTIFICATION"
+}
